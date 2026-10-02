@@ -304,7 +304,6 @@ export function activate(context: vscode.ExtensionContext) {
       if (ok !== 'Enable') return
       rmSync(MOD_DIR, { recursive: true, force: true })
       cpSync(join(context.extensionPath, 'mod'), MOD_DIR, { recursive: true })
-      writeFileSync(join(MOD_DIR, '.pixel-office-version'), String(context.extension?.packageJSON?.version ?? ''))
     }
     // computed again after the dialog, so an edit made meanwhile is kept; a value set in the shell
     // is carried in, since the settings env would otherwise replace it
@@ -355,14 +354,13 @@ export function activate(context: vscode.ExtensionContext) {
   context.subscriptions.push(vscode.window.onDidChangeWindowState(() => void beat()))
   renderStatus()
 
-  // an update ships a newer mod: refresh the installed copy, so new sessions run it
-  const version = String(context.extension?.packageJSON?.version ?? '')
-  const stamp = join(MOD_DIR, '.pixel-office-version')
-  if (enabled && version && (existsSync(stamp) ? readFileSync(stamp, 'utf8') : '') !== version) {
+  // a build ships a different mod (its stamp is version + content hash): refresh the installed copy, so new sessions run it
+  const readStamp = (dir: string) => (existsSync(join(dir, '.pixel-office-version')) ? readFileSync(join(dir, '.pixel-office-version'), 'utf8') : '')
+  const bundled = readStamp(join(context.extensionPath, 'mod'))
+  if (enabled && bundled && readStamp(MOD_DIR) !== bundled) {
     try {
       rmSync(MOD_DIR, { recursive: true, force: true })
       cpSync(join(context.extensionPath, 'mod'), MOD_DIR, { recursive: true })
-      writeFileSync(stamp, version)
     } catch (err) {
       void vscode.window.showErrorMessage(`Pixel Office: could not update the mod (${(err as Error).message}).`)
     }
