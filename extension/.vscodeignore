@@ -1,0 +1,8 @@
+src/**
+webview/**
+test/**
+node_modules/**
+build.mjs
+tsconfig.json
+**/*.map
+mod/hooks/**/*.test.ts

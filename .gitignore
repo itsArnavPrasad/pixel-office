@@ -4,3 +4,9 @@ pixel-office/tsconfig.json
 .DS_Store
 typecheck/
 previews/*.html
+extension/node_modules/
+extension/dist/
+extension/mod/
+extension/test/out/
+extension/media/chime.wav
+extension/*.vsix

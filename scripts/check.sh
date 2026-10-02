@@ -9,3 +9,16 @@ mkdir -p typecheck && cp "$(ls -t /private/tmp/claude-*/bundled-skills/*/*/plugi
 npx tsc -p .
 echo "✔ types"
 "$CLAUDE" plugin test pixel-office 2>&1 | tail -3
+
+# the extension: types, unit tests, bundle, and the webview in headless Chrome when it is installed
+cd extension
+npx tsc -p .
+echo "✔ extension types"
+npm test 2>&1 | grep -E "^ℹ (pass|fail)"
+npm test >/dev/null 2>&1
+node build.mjs >/dev/null 2>&1
+echo "✔ extension bundle"
+node --test test/smoke.test.cjs 2>&1 | grep -E "^ℹ (pass|fail)"
+node --test test/smoke.test.cjs >/dev/null 2>&1
+echo "✔ extension smoke (real bundle, fake vscode)"
+if [ -x "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" ]; then node test/webview-harness.mjs test/out; fi

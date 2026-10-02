@@ -1,0 +1,119 @@
+{
+  "name": "pixel-office",
+  "displayName": "Pixel Office for Claude Code",
+  "description": "See every Claude Code session as a pixel character in a shared office: who is working, who needs you, standups, collisions, and one click to talk to them.",
+  "version": "0.1.0",
+  "publisher": "pixel-office",
+  "license": "MIT",
+  "engines": {
+    "vscode": "^1.90.0"
+  },
+  "categories": [
+    "Other",
+    "Visualization"
+  ],
+  "keywords": [
+    "claude",
+    "claude code",
+    "agents",
+    "pixel art",
+    "dashboard"
+  ],
+  "main": "./dist/extension.js",
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "contributes": {
+    "commands": [
+      {
+        "command": "pixelOffice.open",
+        "title": "Pixel Office: Open Office",
+        "icon": "$(organization)"
+      },
+      {
+        "command": "pixelOffice.nextWaiting",
+        "title": "Pixel Office: Go to Next Agent Waiting for You"
+      },
+      {
+        "command": "pixelOffice.standup",
+        "title": "Pixel Office: Call a Standup"
+      },
+      {
+        "command": "pixelOffice.enable",
+        "title": "Pixel Office: Enable in All Claude Code Sessions"
+      },
+      {
+        "command": "pixelOffice.disable",
+        "title": "Pixel Office: Disable in All Claude Code Sessions"
+      }
+    ],
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "pixelOffice",
+          "title": "Pixel Office",
+          "icon": "media/office.svg"
+        }
+      ]
+    },
+    "views": {
+      "pixelOffice": [
+        {
+          "type": "webview",
+          "id": "pixelOffice.sidebar",
+          "name": "Office"
+        }
+      ]
+    },
+    "menus": {
+      "view/title": [
+        {
+          "command": "pixelOffice.open",
+          "when": "view == pixelOffice.sidebar",
+          "group": "navigation"
+        }
+      ]
+    },
+    "keybindings": [
+      {
+        "command": "pixelOffice.nextWaiting",
+        "key": "ctrl+alt+n",
+        "mac": "ctrl+cmd+n"
+      }
+    ],
+    "configuration": {
+      "title": "Pixel Office",
+      "properties": {
+        "pixelOffice.notifications": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show a notification when an agent starts waiting for you."
+        },
+        "pixelOffice.sound": {
+          "type": "boolean",
+          "default": true,
+          "description": "Play a chime when an agent starts waiting for you (macOS)."
+        },
+        "pixelOffice.showTokens": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show each agent's token use, read from its transcript."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "build": "node build.mjs",
+    "test": "node --test --import ./test/register.mjs \"test/**/*.test.ts\"",
+    "typecheck": "tsc -p .",
+    "package": "node build.mjs && vsce package --no-dependencies --allow-missing-repository",
+    "test:smoke": "node --test test/smoke.test.cjs"
+  },
+  "devDependencies": {
+    "@types/node": "^22.20.5",
+    "@types/vscode": "^1.90.0",
+    "@vscode/vsce": "^3.9.2",
+    "esbuild": "^0.28.2",
+    "typescript": "^5.9.3"
+  }
+}

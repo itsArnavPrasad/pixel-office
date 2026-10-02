@@ -1,0 +1,9 @@
+{
+  "compilerOptions": {
+    "target": "es2022", "lib": ["es2023", "DOM", "DOM.Iterable"], "types": ["node", "vscode"],
+    "module": "esnext", "moduleResolution": "bundler", "allowImportingTsExtensions": true,
+    "strict": true, "noUncheckedIndexedAccess": true, "noEmit": true, "skipLibCheck": true
+  },
+  "include": ["src", "webview", "test", "../pixel-office/hooks/core", "../pixel-office/types"],
+  "exclude": ["../pixel-office/hooks/core/encode.ts"]
+}
