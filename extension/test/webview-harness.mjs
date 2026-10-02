@@ -78,6 +78,8 @@ const cases = [
   { name: 'collision-hidden', mode: 'full', w: 1100, h: 500, view: { ...base, showCollisions: false },
     expect: "!document.querySelector('#attention .card.danger')" },
   { name: 'collision-shown', mode: 'full', w: 1100, h: 500, view: base, expect: "!!document.getElementById('col-hide')" },
+  { name: 'fullscreen', mode: 'full', w: 1100, h: 700, view: base, act: "document.querySelector('.stage .fs').click()",
+    expect: "!!document.querySelector('.stage.full')" },
   { name: 'empty', mode: 'full', w: 900, h: 420, view: { ...base, seats: [], rooms: [], queue: [], collisions: [], isEnabled: false } },
 ]
 

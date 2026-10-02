@@ -68,7 +68,7 @@ function roomSection(r: RoomView): HTMLElement {
   el = document.createElement('section')
   el.className = 'room'
   el.dataset.room = r.id
-  el.innerHTML = `<div class="room-head"></div><div class="room-body"><div class="stage"><canvas></canvas><div class="card" hidden></div></div>
+  el.innerHTML = `<div class="room-head"></div><div class="room-body"><div class="stage"><canvas></canvas><button class="fs" title="Full screen (Esc to exit)">⛶</button><div class="card" hidden></div></div>
     <div class="roster"></div><div class="room-standup"></div></div>`
   const canvas = $<HTMLCanvasElement>('canvas', el)
   const off = document.createElement('canvas')
@@ -80,8 +80,27 @@ function roomSection(r: RoomView): HTMLElement {
   }
   canvas.onmousemove = e => hover(stage, e)
   canvas.onmouseleave = () => (stage.card.hidden = true)
+  // the full-screen button shows while the pointer moves over the office, and fades once it rests
+  const box = canvas.parentElement!
+  let idle = 0
+  box.onmousemove = () => (box.classList.add('show'), clearTimeout(idle), (idle = window.setTimeout(() => box.classList.remove('show'), 2000)))
+  box.onmouseleave = () => (clearTimeout(idle), box.classList.remove('show'))
+  $<HTMLButtonElement>('.fs', el).onclick = () => setFull(box, !box.classList.contains('full'))
   return el
 }
+
+/** Fills the screen with one office; falls back to filling the panel where the webview refuses real full screen. */
+function setFull(box: HTMLElement, on: boolean) {
+  box.classList.toggle('full', on)
+  if (on) box.requestFullscreen?.().catch(() => {})
+  else if (document.fullscreenElement) document.exitFullscreen().catch(() => {})
+}
+document.addEventListener('fullscreenchange', () => {
+  if (!document.fullscreenElement) document.querySelectorAll<HTMLElement>('.stage.full').forEach(b => setFull(b, false))
+})
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape') document.querySelectorAll<HTMLElement>('.stage.full').forEach(b => setFull(b, false))
+})
 
 function renderRooms(byId: Map<string, Seat>) {
   const box = $('#rooms')
@@ -363,8 +382,10 @@ function draw(st: Stage, roomId: string) {
   const fitted = fit(width0, isMini)
   // a small team gets a small office: no wider than its desks need, at the same scale
   const width = Math.min(fitted.width, Math.max(46, st.seats.length * 22 + 2))
-  const scale = fitted.scale
   const L = layout(width, st.seats.length)
+  // full screen: the same office, zoomed to the biggest whole scale that fits
+  const box = st.canvas.parentElement!
+  const scale = box.classList.contains('full') ? Math.max(1, Math.floor(Math.min(box.clientWidth / L.w, box.clientHeight / L.h))) : fitted.scale
   const desk = assignDesks(st.seats.map(s => s.id), L.desks.length)
   Object.assign(st, { L, desk, scale })
   const f = drawOffice(L, st.seats, desk, now, theme(), spotlightOf(roomId, st.seats, now))

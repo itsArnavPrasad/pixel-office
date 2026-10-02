@@ -79,6 +79,9 @@ header.top { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 
 .stage { position: relative; line-height: 0; display: flex; justify-content: center; border-radius: var(--radius); overflow: hidden; }
 canvas { display: block; image-rendering: pixelated; }
+.stage .fs { position: absolute; top: 6px; right: 6px; z-index: 3; line-height: 1.2; padding: 2px 7px; opacity: 0; transition: opacity 0.25s; }
+.stage.show .fs, .stage .fs:hover { opacity: 1; }
+.stage.full { position: fixed; inset: 0; z-index: 50; align-items: center; border-radius: 0; background: var(--vscode-editor-background, #1e1e1e); }
 .stage .card {
   position: absolute; z-index: 2; width: 220px; line-height: 1.4; padding: 8px 10px; pointer-events: none;
   background: var(--vscode-editorHoverWidget-background, #252526); border: 1px solid var(--vscode-editorHoverWidget-border, #454545);
