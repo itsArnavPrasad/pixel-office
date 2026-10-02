@@ -338,7 +338,10 @@ function draw(st: Stage, roomId: string) {
   if (!v || st.el.classList.contains('collapsed')) return
   const now = Date.now()
   const width0 = st.el.querySelector<HTMLElement>('.room-body')!.clientWidth || 300
-  const { width, scale } = fit(width0, isMini)
+  const fitted = fit(width0, isMini)
+  // a small team gets a small office: no wider than its desks need, at the same scale
+  const width = Math.min(fitted.width, Math.max(46, st.seats.length * 22 + 2))
+  const scale = fitted.scale
   const L = layout(width, st.seats.length)
   const desk = assignDesks(st.seats.map(s => s.id), L.desks.length)
   Object.assign(st, { L, desk, scale })

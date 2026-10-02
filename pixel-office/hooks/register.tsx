@@ -654,7 +654,8 @@ export const register: Register = on => {
                 · {chosen.state}{chosen.isAway ? ' · away' : ''} · {chosen.turns} turns · {chosen.tools} tools · {basename(chosen.cwd)}
               </Text>
             </Text>
-            {chosen.bubble ? <Text>“{chosen.bubble}”</Text> : null}
+            {chosen.bubble ? <Text>{chosen.bubble}</Text> : null}
+            {chosen.detail ? <Text dimColor>{truncate(chosen.detail, 120)}</Text> : null}
             {chosen.state === 'needs-you' && !chosen.isMe && (
               <Text color="yellow">Permission prompts are answered in {chosen.name}'s own window. A message sent here runs after it.</Text>
             )}

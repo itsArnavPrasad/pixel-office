@@ -2,7 +2,7 @@
   "name": "pixel-office",
   "displayName": "Pixel Office for Claude Code",
   "description": "See every Claude Code session as a pixel character in a shared office: who is working, who needs you, standups, collisions, and one click to talk to them.",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "publisher": "pixel-office",
   "license": "MIT",
   "engines": {

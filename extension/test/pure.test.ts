@@ -9,7 +9,7 @@ import { parsePs, shellAncestor } from '../src/jump'
 import { parsePeer, uiLeader } from '../src/peers'
 import { parseFromWebview } from '../src/protocol'
 import { addPluginDir, isEnabled, removePluginDir } from '../src/setup'
-import { consume, describeTokens, emptyTranscript, formatTokens, KEEP_ENTRIES, totalTokens } from '../src/transcript'
+import { blocks, consume, describeTokens, emptyTranscript, formatTokens, KEEP_ENTRIES, totalTokens, type Entry } from '../src/transcript'
 import { clock, esc, markdown, tildify } from '../webview/format'
 
 const T = 1_790_000_000_000
@@ -208,5 +208,35 @@ describe('console formatting', () => {
     assert.equal(clock(0, now), '')
     assert.equal(tildify('/Users/me/code/web', '/Users/me'), '~/code/web')
     assert.equal(tildify('/Users/meme/x', '/Users/me'), '/Users/meme/x')
+  })
+})
+
+describe('console blocks and plan', () => {
+  const tool = (t: string, over: Partial<Entry> = {}): Entry => ({ kind: 'tool', tool: t, text: '', at: 1, output: 'ok', ...over })
+  const msg = (kind: 'you' | 'agent', text: string): Entry => ({ kind, text, at: 1 })
+  test('runs of tool calls fold into one summarised block, messages stay', () => {
+    const b = blocks([msg('you', 'go'), tool('Read'), tool('Read'), tool('Edit'), tool('Bash', { isError: true }), msg('agent', 'done'), tool('Bash', { output: undefined })])
+    assert.deepEqual(b.map(x => x.kind), ['message', 'actions', 'message', 'actions'])
+    const first = b[1] as Extract<typeof b[number], { kind: 'actions' }>
+    assert.equal(first.summary, '4 actions · 2 reads, 1 edit, 1 command')
+    assert.equal(first.failed, 1)
+    const last = b[3] as Extract<typeof b[number], { kind: 'actions' }>
+    assert.deepEqual([last.summary, last.running], ['1 action · 1 command', 1])
+  })
+  test('unknown and MCP tools are counted as other; aliases merge', () => {
+    const b = blocks([tool('mcp__github__create_issue'), tool('MultiEdit'), tool('Edit'), tool('Glob')])
+    assert.equal((b[0] as { summary: string }).summary, '4 actions · 1 other, 2 edits, 1 search')
+  })
+  test('the latest TodoWrite becomes the plan; your latest prompt the task', () => {
+    const rows = [
+      { type: 'user', message: { content: 'first ask' } },
+      { type: 'assistant', message: { id: 'a', content: [{ type: 'tool_use', id: 't', name: 'TodoWrite', input: { todos: [
+        { content: 'one', status: 'completed' }, { content: 'two', status: 'in_progress' }, { content: 'bad', status: 'weird' }, { content: 'three', status: 'pending' },
+      ] } }] } },
+      { type: 'user', message: { content: 'second ask' } },
+    ].map(r => JSON.stringify(r)).join('\n') + '\n'
+    const s = consume(emptyTranscript(), rows, rows.length)
+    assert.equal(s.task, 'second ask')
+    assert.deepEqual(s.plan, [{ text: 'one', status: 'completed' }, { text: 'two', status: 'in_progress' }, { text: 'three', status: 'pending' }])
   })
 })

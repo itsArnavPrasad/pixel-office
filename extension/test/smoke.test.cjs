@@ -9,10 +9,13 @@ const { test } = require('node:test')
 
 const HOME = fs.mkdtempSync(path.join(os.tmpdir(), 'pixel-home-'))
 process.env.HOME = HOME
+delete process.env.CLAUDE_CODE_PLUGIN_DIRS // the run must not see the developer's own setting
 const ROOT = path.join(HOME, '.claude', 'pixel-office')
 const EXT = path.resolve(__dirname, '..')
 
-const calls = { info: [], warn: [], error: [], commands: new Map(), executed: [] }
+const calls = { info: [], warn: [], error: [], commands: new Map(), executed: [], terminals: [] }
+const inputs = []
+const picks = []
 let modalAnswer = 'Enable'
 const status = { text: '', show() {}, dispose() {} }
 const vscode = {
@@ -23,6 +26,16 @@ const vscode = {
   Uri: { joinPath: (u, ...p) => ({ fsPath: path.join(u.fsPath, ...p) }) },
   window: {
     terminals: [],
+    state: { focused: true },
+    onDidChangeWindowState: () => ({ dispose() {} }),
+    showInputBox: () => Promise.resolve(inputs.shift()),
+    showQuickPick: items => Promise.resolve(picks.length ? picks.shift() : items[0]),
+    createTerminal: opts => {
+      const t = { opts, sent: [], show() {}, sendText(x) { this.sent.push(x) }, processId: Promise.resolve(0) }
+      calls.terminals.push(t)
+      return t
+    },
+    showTextDocument: () => Promise.resolve(),
     createStatusBarItem: () => status,
     registerWebviewViewProvider: () => ({ dispose() {} }),
     createWebviewPanel: () => ({ webview: { postMessage() {}, onDidReceiveMessage() {}, asWebviewUri: u => u, cspSource: 'x' }, reveal() {}, onDidDispose() {} }),
@@ -30,7 +43,7 @@ const vscode = {
     showWarningMessage: msg => (calls.warn.push(msg), Promise.resolve(undefined)),
     showErrorMessage: msg => (calls.error.push(msg), Promise.resolve(undefined)),
   },
-  workspace: { workspaceFolders: [], getConfiguration: () => ({ get: (_k, d) => (_k === 'sound' ? false : d) }) },
+  workspace: { workspaceFolders: [], openTextDocument: p => Promise.resolve({ p }), getConfiguration: () => ({ get: (_k, d) => (_k === 'sound' ? false : d) }) },
   commands: {
     registerCommand: (id, fn) => (calls.commands.set(id, fn), { dispose() {} }),
     executeCommand: (id, ...a) => (calls.executed.push(id), calls.commands.get(id)?.(...a)),
@@ -51,9 +64,11 @@ const put = rec => {
   fs.writeFileSync(path.join(ROOT, 'agents', `${rec.id}.json`), JSON.stringify(rec))
 }
 
-test('the built extension activates and runs the office end to end', { timeout: 30_000 }, async () => {
+test('the built extension activates and runs the office end to end', { timeout: 30_000 }, async t => {
   const ext = require(path.join(EXT, 'dist', 'extension.js'))
   const subscriptions = []
+  // a failed assertion must still stop the extension's timers, or the run never exits
+  t.after(() => subscriptions.forEach(s => s.dispose?.()))
   const state = new Map()
   ext.activate({
     subscriptions, extensionPath: EXT, extensionUri: { fsPath: EXT },
@@ -61,7 +76,7 @@ test('the built extension activates and runs the office end to end', { timeout: 
   })
 
   // commands are registered, and the first-run offer appears once
-  for (const c of ['pixelOffice.open', 'pixelOffice.nextWaiting', 'pixelOffice.standup', 'pixelOffice.enable', 'pixelOffice.disable'])
+  for (const c of ['pixelOffice.open', 'pixelOffice.newAgent', 'pixelOffice.nextWaiting', 'pixelOffice.standup', 'pixelOffice.enable', 'pixelOffice.disable'])
     assert.ok(calls.commands.has(c), c)
   assert.ok(calls.info.some(m => m.includes('show your Claude Code sessions')))
 
@@ -70,8 +85,8 @@ test('the built extension activates and runs the office end to end', { timeout: 
   assert.equal(fs.readdirSync(path.join(ROOT, 'ui')).filter(n => n.endsWith('.json')).length, 1)
 
   // two agents walk in; one starts waiting → status bar + one notification
-  put(agent('web', { state: 'needs-you', bubble: 'Allow Bash: rm -rf dist?' }))
-  put(agent('api', { state: 'typing', bubble: '$ npm test' }))
+  put(agent('web', { state: 'needs-you', bubble: 'Allow Bash: rm -rf dist?', room: '/tmp/web-repo', roomName: 'web-repo' }))
+  put(agent('api', { state: 'typing', bubble: 'Running tests', room: '/tmp/web-repo', roomName: 'web-repo' }))
   await sleep(2300)
   assert.match(status.text, /organization\) 2/)
   assert.match(status.text, /bell-dot\) 1/)
@@ -96,6 +111,24 @@ test('the built extension activates and runs the office end to end', { timeout: 
   // standup writes a request
   await calls.commands.get('pixelOffice.standup')()
   assert.equal(fs.readdirSync(path.join(ROOT, 'standup')).filter(n => n.endsWith('.json')).length, 1)
+
+  // new agent: name, task, then a terminal in the room's folder (no workspace folder → terminal only)
+  inputs.push('tests-bot', 'write tests for auth')
+  await calls.commands.get('pixelOffice.newAgent')()
+  const tickets = fs.readdirSync(path.join(ROOT, 'spawn')).filter(n => n.endsWith('.json'))
+  assert.equal(tickets.length, 1)
+  const ticket = JSON.parse(fs.readFileSync(path.join(ROOT, 'spawn', tickets[0]), 'utf8'))
+  assert.deepEqual([ticket.room, ticket.name, ticket.task], ['/tmp/web-repo', 'tests-bot', 'write tests for auth'])
+  assert.equal(calls.terminals.length, 1)
+  assert.deepEqual([calls.terminals[0].opts.cwd, calls.terminals[0].sent], ['/tmp/web-repo', ['claude']])
+  // cancelling at the name prompt starts nothing
+  inputs.push(undefined)
+  await calls.commands.get('pixelOffice.newAgent')()
+  assert.equal(fs.readdirSync(path.join(ROOT, 'spawn')).filter(n => n.endsWith('.json')).length, 1)
+
+  // the window tells the mods it is focused and notifying
+  const peer = JSON.parse(fs.readFileSync(path.join(ROOT, 'ui', fs.readdirSync(path.join(ROOT, 'ui')).find(n => n.endsWith('.json'))), 'utf8'))
+  assert.deepEqual([peer.isFocused, peer.isNotifying], [true, true])
 
   // next waiting with nobody in a terminal says where to look
   await calls.commands.get('pixelOffice.nextWaiting')()
