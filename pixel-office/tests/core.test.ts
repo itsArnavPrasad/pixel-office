@@ -64,7 +64,10 @@ describe('signals', () => {
 })
 
 describe('agent reducer', () => {
-  test('start → arriving, then idle after the hold', () => {
+  test('start → arriving, then idle after the hold; a restart keeps joinedAt', () => {
+    expect(reduce(agent({ joinedAt: T - 999 }), { kind: 'start', name: 'x', cwd: '/x', character: 'dev-1' }, T).joinedAt).toBe(T - 999)
+    // state saved before joinedAt existed
+    expect(reduce(agent({ joinedAt: undefined as never }), { kind: 'start', name: 'x', cwd: '/x', character: 'dev-1' }, T).joinedAt).toBe(T)
     const a = reduce(agent(), { kind: 'start', name: 'api', cwd: '/x/api', character: 'dev-2' }, T)
     expect(a).toMatchObject({ state: 'arriving', name: 'api', character: 'dev-2' })
     expect(reduce(a, { kind: 'tick' }, T + HOLD_MS - 1).state).toBe('arriving')
@@ -130,17 +133,18 @@ describe('roster', () => {
     expect(parseRecord(JSON.stringify({ ...good, v: 2 }))).toBe(null)
     expect(parseRecord(JSON.stringify({ ...good, state: 'dancing' }))).toBe(null)
     expect(parseRecord(JSON.stringify({ ...good, heartbeat: 'soon' }))).toBe(null)
+    expect(parseRecord(JSON.stringify({ ...good, joinedAt: undefined }))).toBe(null)
     expect(parseRecord(JSON.stringify({ ...good, id: '' }))).toBe(null)
     expect(parseRecord(JSON.stringify({ ...good, name: 'x'.repeat(101) }))).toBe(null)
   })
   test('mergeRoster prunes, marks away, dedupes and prefers me', () => {
-    const me = agent({ id: 'me', since: T })
+    const me = agent({ id: 'me', joinedAt: T })
     const seats = mergeRoster([
-      agent({ id: 'b', since: T + 2, heartbeat: T }),
-      agent({ id: 'b', since: T + 2, heartbeat: T - 5 }),
+      agent({ id: 'b', joinedAt: T + 2, heartbeat: T }),
+      agent({ id: 'b', joinedAt: T + 2, heartbeat: T - 5 }),
       agent({ id: 'old', heartbeat: T - PRUNE_MS - 10 }),
       agent({ id: 'me', name: 'stale copy', heartbeat: T - 99 }),
-      agent({ id: 'c', since: T + 1, heartbeat: T - 30_000 }),
+      agent({ id: 'c', joinedAt: T + 1, heartbeat: T - 30_000 }),
       null,
     ], me, T)
     expect(seats.map(s => s.id)).toEqual(['me', 'c', 'b'])

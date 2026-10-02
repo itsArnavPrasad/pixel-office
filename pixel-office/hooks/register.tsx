@@ -1,13 +1,18 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register, RenderPropsOf } from 'claude-code'
 
-import type { AgentRecord, LogLine } from '../types'
+import type { AgentRecord, LogLine, Standup, StandupAnswer } from '../types'
 import { byUrgency, newAgent, PRUNE_MS, reduce, type Signal } from './core/agent'
+import { alertLeader, alertsDue, formatWait, notifyArgv, waitingQueue } from './core/alerts'
 import { toRasterCells, toSvg } from './core/encode'
-import { asPrompt, makeMessage, parseMessage, pendingFiles } from './core/inbox'
+import { asPrompt, makeMessage, messageId, parseMessage, pendingFiles } from './core/inbox'
 import { assignDesks, hash, mergeRoster, parseRecord, type Seat } from './core/roster'
-import { drawOffice, layout } from './core/scene'
+import { drawOffice, layout, type Spotlight } from './core/scene'
 import { LOOK_IDS } from './core/sprites'
+import {
+  ANSWER_WINDOW_MS, KEEP_MS, PENDING_MS, SHOW_MS, STANDUP_PROMPT, headline, latestRequest, makeRequest, parseAnswer,
+  parseReport, parseRequest, presenter,
+} from './core/standup'
 import { basename, bubble, clean, truncate } from './core/text'
 
 type $ = EngineInterface
@@ -17,6 +22,8 @@ const me = atom({ plugin: 'pixel-office', key: 'me' } as const, null)
 const roster = atom({ plugin: 'pixel-office', key: 'roster' } as const, [])
 const selected = atom({ plugin: 'pixel-office', key: 'selected' } as const, null)
 const logs = atom({ plugin: 'pixel-office', key: 'logs' } as const, {})
+const alerted = atom({ plugin: 'pixel-office', key: 'alerted' } as const, {})
+const standup = atom({ plugin: 'pixel-office', key: 'standup' } as const, null)
 
 const HEARTBEAT_MS = 2000
 const POLL_MS = 1000
@@ -24,6 +31,8 @@ const FRAME_MS = 125
 const SVG_FRAME_MS = 400
 const LOG_KEEP = 30
 const MAX_AGENTS = 64
+const GC_EVERY = 60 // polls
+const CHIME = 'sounds/chime.wav'
 
 const ICON: Record<AgentRecord['state'], string> = {
   arriving: '🚶', idle: '○', thinking: '💭', typing: '⌨', reading: '📖', writing: '✎', browsing: '🌐',
@@ -40,10 +49,15 @@ const rt = {
   blitting: null as { cancel: () => void } | null,
   svgTicking: null as { cancel: () => void } | null,
   isDelivering: false,
+  isAnswering: false,
+  isAlertsOn: true,
+  isSoundOn: true,
+  polls: 0,
 }
 
 const agentsDir = () => `${rt.root}/agents`
 const inboxDir = (id: string) => `${rt.root}/inbox/${id}`
+const standupDir = () => `${rt.root}/standup`
 
 async function log($: $, id: string, who: string, text: string) {
   const line: LogLine = { at: await $.clock.now(), who, text: truncate(clean(text), 500) }
@@ -102,7 +116,10 @@ async function poll($: $) {
   const status = seats.length > 1 ? `🏢 ${seats.length} in the office${waiting ? ` · ❗ ${waiting} need${waiting === 1 ? 's' : ''} you` : ''}` : ''
   if (status !== rt.lastStatus) $.ui.status((rt.lastStatus = status) || undefined)
 
+  await alert($, seats, now)
   await deliver($)
+  await pollStandup($, now)
+  if (++rt.polls % GC_EVERY === 0) await sweepStandups($, now)
 }
 
 /** Messages addressed to this session, oldest first, each delivered once. */
@@ -132,6 +149,86 @@ async function deliver($: $) {
   }
 }
 
+/** Toasts in every session; chime and OS notification from the alert leader only. */
+async function alert($: $, seats: Seat[], now: number) {
+  const due = alertsDue(waitingQueue(seats), await read($, alerted), now)
+  if (JSON.stringify(due.memory) !== JSON.stringify(await read($, alerted))) await update($, alerted, () => due.memory)
+  if (!rt.isAlertsOn || (!due.fresh.length && !due.remind.length)) return
+  const isLeader = alertLeader(seats) === rt.myId
+  for (const s of due.fresh) {
+    if (!s.isMe) $.ui.toast(`❗ ${s.name} needs you: ${s.bubble}`)
+    if (isLeader) void $.process.run(notifyArgv(`❗ ${s.name} needs you`, s.bubble || 'Waiting for you')).catch(() => {})
+  }
+  for (const s of due.remind) {
+    const waited = formatWait(now - s.since)
+    if (!s.isMe) $.ui.toast(`❗ ${s.name} is still waiting (${waited})`)
+    if (isLeader) void $.process.run(notifyArgv(`❗ ${s.name} still waiting · ${waited}`, s.bubble || 'Waiting for you')).catch(() => {})
+  }
+  if (isLeader && rt.isSoundOn) void $.audio.play({ asset: CHIME }).catch(() => {})
+}
+
+async function openOn($: $, id: string) {
+  await update($, selected, () => id)
+  await $.ui.open({ id: PANE, title: 'Pixel Office' })
+}
+
+async function requestStandup($: $) {
+  const now = await $.clock.now()
+  const id = messageId(now, Math.random())
+  const by = (await read($, me))?.name ?? 'someone'
+  await $.fs.write(`${standupDir()}/${id}.json`, JSON.stringify(makeRequest(id, by, now)))
+  $.ui.toast('🗣 Standup! Everyone is reporting in…')
+  await pollStandup($, now)
+}
+
+/** Loads the latest standup into state, and answers it once if it is fresh. */
+async function pollStandup($: $, now: number) {
+  const names = (await $.fs.list(standupDir()).catch(() => [])).map(f => f.name)
+  const id = latestRequest(names, now, SHOW_MS)
+  const shown = await read($, standup)
+  if (!id) {
+    if (shown) await update($, standup, () => null)
+    return
+  }
+  const request = parseRequest(await $.fs.read(`${standupDir()}/${id}.json`).catch(() => ''))
+  if (!request) return
+  const answers: StandupAnswer[] = []
+  for (const f of await $.fs.list(`${standupDir()}/${id}`).catch(() => [])) {
+    const a = parseAnswer(await $.fs.read(`${standupDir()}/${id}/${f.name}`).catch(() => ''))
+    if (a && `${a.id}.json` === f.name) answers.push(a)
+  }
+  const next = { request, answers: answers.sort((a, b) => a.at - b.at) }
+  if (JSON.stringify(next) !== JSON.stringify(shown)) await update($, standup, () => next)
+
+  const key = `standup:${rt.myId}`
+  if (rt.isAnswering || now - request.requestedAt > ANSWER_WINDOW_MS || (await $.store.get(key)) === id) return
+  await $.store.set(key, id) // claimed before the fork, so a slow fork is never asked twice
+  rt.isAnswering = true
+  void answerStandup($, id).finally(() => (rt.isAnswering = false))
+}
+
+async function answerStandup($: $, requestId: string) {
+  const r = await $.model.fork({ prompt: STANDUP_PROMPT }).catch(() => null)
+  const report =
+    r && r.isAnswered ? parseReport(r.text)
+    : r && r.reason === 'nothing-to-fork' ? { done: 'Just got here, no work yet.', next: '', blocked: '' }
+    : { done: "(couldn't report)", next: '', blocked: '' }
+  const self = await read($, me)
+  const answer: StandupAnswer = {
+    v: 1, id: rt.myId, name: self?.name ?? 'claude', character: self?.character ?? 'dev-1', ...report, at: await $.clock.now(),
+  }
+  await $.fs.write(`${standupDir()}/${requestId}/${rt.myId}.json`, JSON.stringify(answer))
+}
+
+/** Removes standups older than KEEP_MS; only names that parse as request ids. */
+async function sweepStandups($: $, now: number) {
+  const old = (await $.fs.list(standupDir()).catch(() => []))
+    .map(f => f.name.replace(/\.json$/, ''))
+    .filter(id => /^\d{13}-[0-9a-z]{6}$/.test(id) && now - Number(id.slice(0, 13)) > KEEP_MS)
+  const paths = [...new Set(old)].flatMap(id => [`${standupDir()}/${id}`, `${standupDir()}/${id}.json`])
+  if (paths.length) void $.process.run(['rm', '-rf', '--', ...paths]).catch(() => {})
+}
+
 async function send($: $, to: string, text: string) {
   const m = makeMessage('you', 'you', text, await $.clock.now(), Math.random())
   if (!m) return
@@ -149,10 +246,19 @@ async function seatsNow($: $): Promise<{ seats: Seat[]; now: number }> {
   return { seats: mergeRoster(await read($, roster), await read($, me), now), now }
 }
 
-function scene(seats: Seat[], columns: number, now: number) {
+function scene(seats: Seat[], columns: number, now: number, spot: Spotlight | null = null) {
   const L = layout(columns, seats.length)
   const desk = assignDesks(seats.map(s => s.id), L.desks.length)
-  return { L, f: drawOffice(L, seats, desk, now) }
+  return { L, f: drawOffice(L, seats, desk, now, undefined, spot) }
+}
+
+async function spotlightNow($: $, seats: Seat[], now: number): Promise<Spotlight | null> {
+  const st = await read($, standup)
+  if (!st) return null
+  const here = st.answers.filter(a => seats.some(s => s.id === a.id))
+  const id = presenter(here, st.request.requestedAt, now)
+  const a = here.find(x => x.id === id)
+  return a ? { id: a.id, text: headline(a), isBlocked: !!a.blocked } : null
 }
 
 function startBlitting($: $) {
@@ -163,7 +269,7 @@ async function blitFrame($: $) {
   const m = rt.mounted
   if (!m) return
   const { seats, now } = await seatsNow($)
-  const { L, f } = scene(seats, m.w, now)
+  const { L, f } = scene(seats, m.w, now, await spotlightNow($, seats, now))
   // more or fewer desk rows is a new mount: redraw instead of blitting
   if (L.h !== m.h || seats.length !== m.n) return $.ui.invalidate('ui.render')
   const res = await $.ui.blit({ requestId: PANE, key: 'office', cells: toRasterCells(f) })
@@ -191,6 +297,8 @@ async function setIdentity($: $, field: 'name' | 'character', value: string) {
 async function start($: $, cwd: string) {
   rt.root = `${(await $.env.get('HOME')) ?? '~'}/.claude/pixel-office`
   rt.myId = await $.session.id()
+  rt.isAlertsOn = (await $.store.get('alerts')) !== 'off'
+  rt.isSoundOn = (await $.store.get('sound')) !== 'off'
   const name = String((await $.store.get(`name:${cwd}`)) ?? (basename(cwd) || 'claude'))
   const character = String((await $.store.get(`look:${cwd}`)) ?? LOOK_IDS[hash(cwd) % LOOK_IDS.length])
   await signal($, { kind: 'start', name: truncate(name, 40), cwd, character })
@@ -202,15 +310,43 @@ async function start($: $, cwd: string) {
 async function office($: $, e: { surface: string; props: RenderPropsOf['Pane'] }) {
   const { seats, now } = await seatsNow($)
   const columns = Math.max(24, e.props.bodyColumns)
+  const spot = await spotlightNow($, seats, now)
   if (e.surface === 'terminal') {
-    const { L, f } = scene(seats, columns, now)
+    const { L, f } = scene(seats, columns, now, spot)
     rt.mounted = { w: L.w, h: L.h, n: seats.length }
     startBlitting($)
     return { kind: 'raster' as const, columns: L.w, rows: L.h / 2, cells: toRasterCells(f), seats }
   }
-  const { L, f } = scene(seats, Math.min(columns, 132), now)
+  const { L, f } = scene(seats, Math.min(columns, 132), now, spot)
   startSvgTicking($)
   return { kind: 'svg' as const, source: toSvg(f, 6), width: L.w * 6, seats }
+}
+
+function standupCard($: $, e: Parameters<$['ui']['resolve']>[0], st: Standup, seats: Seat[], now: number) {
+  const { Box, Text } = $.ui.resolve(e)
+  const rows = new Map<string, { name: string; a?: StandupAnswer }>()
+  for (const s of seats) rows.set(s.id, { name: s.name })
+  for (const a of st.answers) rows.set(a.id, { name: a.name, a })
+  const isLate = now - st.request.requestedAt > PENDING_MS
+  return (
+    <Box key="standup-card" flexDirection="column" borderStyle="round" borderColor="green" paddingX={1}>
+      <Text bold color="green">
+        🗣 Standup <Text dimColor>· called by {st.request.by} {formatWait(now - st.request.requestedAt)} ago</Text>
+      </Text>
+      {[...rows.values()].map(({ name, a }) =>
+        a ? (
+          <Box flexDirection="column">
+            <Text bold>{truncate(name, 24)}</Text>
+            {a.done ? <Text>  ✓ {a.done}</Text> : null}
+            {a.next ? <Text dimColor>  → {a.next}</Text> : null}
+            {a.blocked ? <Text color="yellow">  ❗ {a.blocked}</Text> : null}
+          </Box>
+        ) : (
+          <Text dimColor>{truncate(name, 24)} {isLate ? '(no answer)' : '… thinking'}</Text>
+        ),
+      )}
+    </Box>
+  )
 }
 
 export const register: Register = on => {
@@ -232,6 +368,17 @@ export const register: Register = on => {
       await setIdentity($, 'name', truncate(arg, 40))
       return { text: `You are now "${truncate(arg, 40)}" in the office.` }
     }
+    if (verb === 'standup') {
+      await requestStandup($)
+      await $.ui.open({ id: PANE, title: 'Pixel Office' })
+      return { text: 'Standup called: every session is reporting in.' }
+    }
+    if ((verb === 'alerts' || verb === 'sound') && (arg === 'on' || arg === 'off')) {
+      await $.store.set(verb, arg)
+      if (verb === 'alerts') rt.isAlertsOn = arg === 'on'
+      else rt.isSoundOn = arg === 'on'
+      return { text: `${verb === 'alerts' ? 'Alerts' : 'Chime'} ${arg}.` }
+    }
     if (verb === 'look') {
       const cur = (await read($, me))?.character ?? ''
       const look = LOOK_IDS.includes(arg) ? arg : LOOK_IDS[(LOOK_IDS.indexOf(cur) + 1) % LOOK_IDS.length]!
@@ -239,7 +386,7 @@ export const register: Register = on => {
       return { text: `New look: ${look}. Looks: ${LOOK_IDS.join(', ')}.` }
     }
     await $.ui.open({ id: PANE, title: 'Pixel Office' })
-    return { text: 'Pixel Office is open. Tip: /office name <name> · /office look [dev-1…dev-8]' }
+    return { text: 'Pixel Office is open. Tip: /office standup · /office name <name> · /office look · /office alerts|sound on|off' }
   })
 
   on('ui.close', async ($, e, next) => {
@@ -321,10 +468,27 @@ export const register: Register = on => {
       )
     }
 
+    const now = await $.clock.now()
+    const queue = waitingQueue(view.seats).filter(s => !s.isMe)
+    const st = await read($, standup)
     const chips = [...view.seats].sort(byUrgency).slice(0, 9)
     return (
       <Box flexDirection="column">
+        {queue.length > 0 && (
+          <Box key="queue" flexDirection="column" borderStyle="round" borderColor="yellow" paddingX={1}>
+            <Text bold color="yellow">❗ Needs you ({queue.length})</Text>
+            {queue.slice(0, 5).map(s => (
+              <Text>
+                <Text bold>{truncate(s.name, 20)}</Text> <Text dimColor>· waiting {formatWait(now - s.since)} ·</Text> {truncate(s.bubble, 70)}
+              </Text>
+            ))}
+          </Box>
+        )}
         {scene}
+        <Box flexDirection="row" flexWrap="wrap" gap={1}>
+          {queue[0] && <Button key="next" hotkey="n" variant="primary" label={`❗ Next: ${truncate(queue[0].name, 14)}`} onPress={() => openOn($, queue[0]!.id)} />}
+          <Button key="standup" hotkey="s" label="🗣 Standup" onPress={() => requestStandup($)} />
+        </Box>
         <Box flexDirection="row" flexWrap="wrap" gap={1}>
           {chips.map((s, i) => (
             <Button
@@ -337,6 +501,7 @@ export const register: Register = on => {
           ))}
         </Box>
         {view.seats.length < 2 && <Text dimColor>Start another Claude Code session: it walks in and takes a desk.</Text>}
+        {st && standupCard($, e, st, view.seats, now)}
         {chosen && (
           <Box flexDirection="column" borderStyle="round" paddingX={1}>
             <Text bold>
@@ -346,6 +511,9 @@ export const register: Register = on => {
               </Text>
             </Text>
             {chosen.bubble ? <Text>“{chosen.bubble}”</Text> : null}
+            {chosen.state === 'needs-you' && !chosen.isMe && (
+              <Text color="yellow">Permission prompts are answered in {chosen.name}'s own window. A message sent here runs after it.</Text>
+            )}
             {lines.map(l => (
               <Text dimColor={l.who !== 'you'}>
                 <Text bold>{l.who}:</Text> {truncate(l.text, 300)}
@@ -355,6 +523,23 @@ export const register: Register = on => {
             <Button key="close" role="dismiss" label="Close" onPress={() => update($, selected, () => null)} />
           </Box>
         )}
+      </Box>
+    )
+  })
+
+  on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
+    if (e.props.hasSurvey || !rt.myId) return next(e)
+    const { seats, now } = await seatsNow($)
+    const queue = waitingQueue(seats).filter(s => !s.isMe)
+    if (!queue.length) return next(e)
+    const { Box, Text, Button } = $.ui.resolve(e)
+    const list = queue.slice(0, 3).map(s => `${truncate(s.name, 16)} ${formatWait(now - s.since)}`).join(' · ')
+    return (
+      <Box flexDirection="row" gap={1}>
+        <Text color="yellow" wrap="truncate-end">
+          ❗ {queue.length} waiting: {list}{queue.length > 3 ? ' …' : ''}
+        </Text>
+        <Button key="band-next" hotkey="n" variant="primary" label={`Open ${truncate(queue[0]!.name, 14)}`} onPress={() => openOn($, queue[0]!.id)} />
       </Box>
     )
   })

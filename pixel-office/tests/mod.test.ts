@@ -3,7 +3,7 @@ import type { On, RenderSurface } from 'claude-code'
 
 import type { AgentRecord } from '../types'
 import { newAgent } from '../hooks/core/agent'
-import { makeMessage } from '../hooks/core/inbox'
+import { makeMessage, messageId } from '../hooks/core/inbox'
 
 const T = 1_759_400_000_000
 const HOME = '/home/u'
@@ -16,6 +16,11 @@ function world(on: On) {
   const files = new Map<string, string>()
   const prompts: string[] = []
   const opened: string[] = []
+  const toasts: string[] = []
+  const notified: string[][] = []
+  const forks: string[] = []
+  const sound = { chimes: 0 }
+  const fork = { reply: 'Done: fixed login\nNext: add tests\nBlocked: nothing' as string | null }
   const statuses: string[] = []
   const clock = mock.clock(on, { now: T })
   mock.store(on)
@@ -34,7 +39,8 @@ function world(on: On) {
       .map(([p, t]) => ({ name: p.slice(p.lastIndexOf('/') + 1), kind: 'file', size: t.length, mtimeMs: clock.now(), isLink: false }))),
   )
   on('process.run', ($, e) => {
-    if (e.argv[0] === 'rm') for (const p of e.argv.slice(3)) files.delete(p)
+    if (e.argv[0] === 'rm') for (const p of e.argv.slice(3)) for (const k of [...files.keys()]) if (k === p || k.startsWith(`${p}/`)) files.delete(k)
+    if (e.argv[0] === 'osascript') notified.push([...e.argv.slice(-2)])
     return ok({ exitCode: 0, stdout: '', stderr: '' })
   })
   on('session.id', () => ok(ME))
@@ -43,15 +49,22 @@ function world(on: On) {
   on('session.start', ($, e) => ({ cwd: e.cwd }))
   on('session.end', ($, e) => ({ sessionId: e.sessionId }) as never)
   on('command.register', ($, e) => ok({ command: e.name }))
-  for (const n of ['ui.toast', 'ui.log', 'ui.close', 'ui.invalidate'] as const) on(n, () => ok())
+  on('ui.toast', ($, e) => (toasts.push(JSON.stringify(e)), ok()))
+  for (const n of ['ui.log', 'ui.close', 'ui.invalidate'] as const) on(n, () => ok())
+  on('audio.play', () => (sound.chimes++, ok()))
+  on('model.fork', ($, e) => {
+    forks.push(e.prompt)
+    return ok(fork.reply === null ? { isAnswered: false, reason: 'nothing-to-fork' } : { isAnswered: true, text: fork.reply, usage: {} })
+  })
   on('ui.open', ($, e) => (opened.push(e.id), ok({})))
   on('ui.blit', () => ok({}))
+  on('ui.render', () => h(Fragment, null) as never) // the engine's own drawing, as nothing
   on('turn.complete', ($, e) => ({ text: e.answer }) as never)
   on('classic.PermissionRequest', () => ({}) as never)
   on('classic.Notification', () => ({}) as never)
   const mine = (): AgentRecord => JSON.parse(files.get(MY_FILE) ?? 'null')
   const put = (rec: AgentRecord) => files.set(`${ROOT}/agents/${rec.id}.json`, JSON.stringify(rec))
-  return { files, prompts, opened, statuses, clock, mine, put }
+  return { files, prompts, opened, toasts, notified, forks, fork, sound, statuses, clock, mine, put }
 }
 
 async function boot($: Engine, cwd = '/work/api-server') {
@@ -165,5 +178,117 @@ describe('pane', () => {
     expect(w.mine().name).toBe('Ada')
     await $.command.run({ command: 'office', args: 'look dev-5' } as never)
     expect(w.mine().character).toBe('dev-5')
+  })
+})
+
+const BAND_PROPS = {
+  hasSurvey: false, isWorking: false, maxRows: 10, bodyColumns: 100,
+  scroll: { offset: 0, bodyRows: 10, contentRows: 10 }, view: {},
+}
+
+describe('attention queue', () => {
+  test('the leader chimes and notifies once per episode, then reminds once', async ($, on) => {
+    const w = world(on)
+    await boot($)
+    w.put({ ...newAgent('web', T + 50), name: 'web', state: 'needs-you', bubble: 'Allow Bash: rm -rf dist?' })
+    await w.clock.advance(1100)
+    expect(w.notified).toEqual([['Allow Bash: rm -rf dist?', '❗ web needs you']])
+    expect(w.sound.chimes).toBe(1)
+    expect(w.toasts.some(t => t.includes('web needs you'))).toBe(true)
+    await w.clock.advance(5000)
+    expect([w.notified.length, w.sound.chimes]).toEqual([1, 1])
+    // keep the other session's heartbeat fresh while it waits past the reminder
+    for (let i = 0; i < 19; i++) {
+      w.put({ ...newAgent('web', T + 50), name: 'web', state: 'needs-you', bubble: 'Allow Bash: rm -rf dist?', heartbeat: w.clock.now() })
+      await w.clock.advance(10_000)
+    }
+    expect(w.notified.length).toBe(2)
+    expect(w.notified[1]![1]).toContain('still waiting')
+    expect(w.sound.chimes).toBe(2)
+  })
+
+  test('a session that is not the leader toasts but stays quiet', async ($, on) => {
+    const w = world(on)
+    w.put({ ...newAgent('older', T - 60_000), name: 'older', heartbeat: T })
+    await boot($)
+    w.put({ ...newAgent('web', T + 50), name: 'web', state: 'needs-you', bubble: 'Which DB?' })
+    await w.clock.advance(1100)
+    expect([w.notified.length, w.sound.chimes]).toEqual([0, 0])
+    expect(w.toasts.some(t => t.includes('web needs you'))).toBe(true)
+  })
+
+  test('/office alerts off silences everything; sound off keeps notifications', async ($, on) => {
+    const w = world(on)
+    await boot($)
+    await $.command.run({ command: 'office', args: 'alerts off' } as never)
+    w.put({ ...newAgent('web', T + 50), name: 'web', state: 'needs-you', bubble: 'Which DB?' })
+    await w.clock.advance(1100)
+    expect([w.notified.length, w.sound.chimes, w.toasts.filter(t => t.includes('needs you')).length]).toEqual([0, 0, 0])
+    await $.command.run({ command: 'office', args: 'alerts on' } as never)
+    await $.command.run({ command: 'office', args: 'sound off' } as never)
+    w.put({ ...newAgent('api', T + 60), name: 'api', state: 'needs-you', bubble: 'Allow Edit?' })
+    await w.clock.advance(1100)
+    expect([w.notified.length, w.sound.chimes]).toEqual([1, 0])
+  })
+
+  test('the band lists who waits and opens the oldest; hidden when nobody waits', async ($, on) => {
+    const w = world(on)
+    await boot($)
+    const empty = await $.ui.mount({ plugin: 'pixel-office', surface: 'terminal', component: 'AbovePrompt', props: BAND_PROPS })
+    expect(await empty.find({ key: 'band-next' })).toBeUndefined()
+    await empty.unmount()
+    w.put({ ...newAgent('b', T + 90), name: 'beta', state: 'needs-you', since: T + 90, bubble: 'q' })
+    w.put({ ...newAgent('a', T + 10), name: 'alpha', state: 'needs-you', since: T + 10, bubble: 'q' })
+    await w.clock.advance(1100)
+    for (const surface of ['terminal', 'desktop'] as const) {
+      const ui = await $.ui.mount({ plugin: 'pixel-office', surface, component: 'AbovePrompt', props: BAND_PROPS })
+      expect(await ui.find({ type: 'Text', text: /2 waiting: alpha .* · beta/ })).toBeDefined()
+      await ui.press({ key: 'band-next' })
+      await ui.unmount()
+    }
+    expect(w.opened).toContain('pixel-office')
+    const pane = await $.ui.mount({ plugin: 'pixel-office', surface: 'vscode', component: 'Pane', props: PANE_PROPS, requestId: 'pixel-office' })
+    expect(await pane.find({ type: 'Text', text: /Needs you \(2\)/ })).toBeDefined()
+    expect(await pane.find({ type: 'Text', text: /answered in alpha's own window/ })).toBeDefined()
+  })
+})
+
+describe('standup', () => {
+  test('a press asks every session; ours answers once from a fork', async ($, on) => {
+    const w = world(on)
+    await boot($)
+    w.put({ ...newAgent('web', T + 50), name: 'web' })
+    await w.clock.advance(1100)
+    const ui = await $.ui.mount({ plugin: 'pixel-office', surface: 'vscode', component: 'Pane', props: PANE_PROPS, requestId: 'pixel-office' })
+    await ui.press({ key: 'standup' })
+    await w.clock.advance(1100)
+    const reqs = [...w.files.keys()].filter(k => /\/standup\/[^/]+\.json$/.test(k))
+    expect(reqs.length).toBe(1)
+    const id = reqs[0]!.split('/').at(-1)!.slice(0, -5)
+    const mineFile = `${ROOT}/standup/${id}/${ME}.json`
+    expect(JSON.parse(w.files.get(mineFile)!)).toMatchObject({ id: ME, done: 'fixed login', next: 'add tests', blocked: '' })
+    // another session answers too
+    w.files.set(`${ROOT}/standup/${id}/web.json`, JSON.stringify({ v: 1, id: 'web', name: 'web', character: 'dev-2', done: 'built the page', next: '', blocked: 'need the API key', at: w.clock.now() }))
+    await w.clock.advance(3000)
+    expect(w.forks.length).toBe(1)
+    expect(await ui.find({ type: 'Text', text: /✓ fixed login/ })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: /❗ need the API key/ })).toBeDefined()
+    await ui.unmount()
+  })
+
+  test('a fresh session reports that it just arrived; old standups are not answered', async ($, on) => {
+    const w = world(on)
+    w.fork.reply = null
+    await boot($)
+    await $.command.run({ command: 'office', args: 'standup' } as never)
+    await w.clock.advance(1100)
+    const answer = [...w.files.entries()].find(([k]) => k.endsWith(`/${ME}.json`) && k.includes('/standup/'))
+    expect(JSON.parse(answer![1]).done).toBe('Just got here, no work yet.')
+    // a request older than the answer window is shown, never answered
+    const old = messageId(w.clock.now() - 6 * 60_000, 0.4)
+    w.files.set(`${ROOT}/standup/${old}.json`, JSON.stringify({ v: 1, id: old, by: 'x', requestedAt: w.clock.now() - 6 * 60_000 }))
+    const before = w.forks.length
+    await w.clock.advance(1100)
+    expect(w.forks.length).toBe(before)
   })
 })

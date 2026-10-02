@@ -27,7 +27,7 @@ export function isWorking(state: AgentState): boolean {
 export function newAgent(id: string, now: number): AgentRecord {
   return {
     v: 1, id, name: 'claude', cwd: '', character: 'dev-1', state: 'arriving', bubble: 'Morning!',
-    isBusy: false, since: now, heartbeat: now, turns: 0, tools: 0, interns: 0, lastLine: '',
+    isBusy: false, joinedAt: now, since: now, heartbeat: now, turns: 0, tools: 0, interns: 0, lastLine: '',
   }
 }
 
@@ -37,7 +37,8 @@ export function reduce(a: AgentRecord, s: Signal, now: number): AgentRecord {
 
   switch (s.kind) {
     case 'start':
-      return { ...newAgent(a.id, now), name: s.name, cwd: s.cwd, character: s.character, turns: a.turns, tools: a.tools }
+      // a restart or hot reload keeps the arrival time, so seniority is stable
+      return { ...newAgent(a.id, now), name: s.name, cwd: s.cwd, character: s.character, turns: a.turns, tools: a.tools, joinedAt: a.joinedAt || now }
     case 'prompt':
       return to('thinking', bubble(s.text), { isBusy: true, turns: a.turns + 1 })
     case 'tool': {

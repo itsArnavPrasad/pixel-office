@@ -16,6 +16,9 @@ export const MAX_ROWS = 4
 export const IDLE_ZZZ_MS = 60_000
 const BUBBLE_W = CELL_W - 2
 
+/** A standup presenter: stands up and says `text` (yellow when blocked, else green). */
+export type Spotlight = { id: string; text: string; isBlocked: boolean }
+
 export type Layout = { w: number; h: number; cols: number; rows: number; desks: { x: number; y: number }[] }
 
 /** One pixel per column; desk rows grow with the head count, up to MAX_ROWS. */
@@ -33,13 +36,13 @@ export const DOOR_AT = { x: 3, y: WALL_H - DOOR.length }
 
 export type Theme = {
   wall: number; trim: number; floorA: number; floorB: number
-  bubble: number; bubbleText: number; alert: number; plate: number; plateText: number
+  bubble: number; bubbleText: number; alert: number; spot: number; plate: number; plateText: number
   isNight: boolean
 }
 
 export const DEFAULT_THEME: Theme = {
   wall: 0x3b3552, trim: 0x2a2540, floorA: 0xc8a77a, floorB: 0xbf9d70,
-  bubble: 0xffffff, bubbleText: 0x1a1a1a, alert: 0xffe08a, plate: 0x2a2540, plateText: 0xf0f0f0,
+  bubble: 0xffffff, bubbleText: 0x1a1a1a, alert: 0xffe08a, spot: 0xc8f7c5, plate: 0x2a2540, plateText: 0xf0f0f0,
   isNight: false,
 }
 
@@ -51,7 +54,9 @@ const SCREEN: Partial<Record<Seat['state'], number[]>> = {
 }
 
 /** Draws the office for `now`; `seats` already know their desk (`desk` map, -1 = none). */
-export function drawOffice(L: Layout, seats: Seat[], desk: Map<string, number>, now: number, theme = DEFAULT_THEME): Frame {
+export function drawOffice(
+  L: Layout, seats: Seat[], desk: Map<string, number>, now: number, theme = DEFAULT_THEME, spotlight: Spotlight | null = null,
+): Frame {
   const f = frame(L.w, L.h, theme.floorA)
   drawRoom(f, L, theme)
   const tick = Math.floor(now / 250) % 2
@@ -64,7 +69,8 @@ export function drawOffice(L: Layout, seats: Seat[], desk: Map<string, number>, 
     const pal = lookPalette(s.character, hash(s.id))
     const dim = s.isAway ? 0.45 : 1
     const cx = at.x + 10
-    const cy = at.y + 6
+    const spot = spotlight?.id === s.id ? spotlight : null
+    const cy = at.y + 6 - (spot ? 2 : 0) // a presenter stands up
     const walking = s.state === 'arriving' || s.state === 'leaving'
 
     if (!walking) {
@@ -107,7 +113,7 @@ export function drawOffice(L: Layout, seats: Seat[], desk: Map<string, number>, 
       })
     }
 
-    drawBubble(f, s, at, now, theme)
+    drawBubble(f, s, at, now, theme, spot)
     const label = truncate(`${s.isMe ? '• ' : ''}${s.name}`, BUBBLE_W)
     const lcol = at.x + 1 + Math.floor((BUBBLE_W - [...label].length) / 2)
     text(f, lcol, at.y / 2 + 10, label, s.isAway ? 0x9a9a9a : theme.plateText, theme.plate)
@@ -121,11 +127,12 @@ function acc(f: Frame, name: keyof typeof ACCESSORY, cx: number, cy: number, pal
   blit(f, a.art, cx + a.at[0], cy + a.at[1], { ...ACCESSORY_PALETTE, s: pal.s!, c: pal.c! }, dim)
 }
 
-function drawBubble(f: Frame, s: Seat, at: { x: number; y: number }, now: number, theme: Theme) {
+function drawBubble(f: Frame, s: Seat, at: { x: number; y: number }, now: number, theme: Theme, spot: Spotlight | null) {
   let words = s.bubble
   let bg = theme.bubble
   let fg = theme.bubbleText
-  if (s.isAway) (words = '(away)'), (bg = 0x55556a), (fg = 0xdddddd)
+  if (spot) (words = spot.text), (bg = spot.isBlocked ? theme.alert : theme.spot)
+  else if (s.isAway) (words = '(away)'), (bg = 0x55556a), (fg = 0xdddddd)
   else if (s.state === 'needs-you') bg = theme.alert
   else if (s.state === 'idle' && now - s.since > IDLE_ZZZ_MS) (words = 'z z z'), (bg = theme.wall), (fg = 0xcfd6ff)
   if (!words) return

@@ -23,7 +23,7 @@ export function parseRecord(text: string): AgentRecord | null {
   const ok =
     r.v === 1 && isStr(r.id, 100) && r.id.length > 0 && isStr(r.name, 100) && isStr(r.cwd, 4096) &&
     isStr(r.character, 50) && STATES.includes(r.state as AgentState) && isStr(r.bubble) &&
-    typeof r.isBusy === 'boolean' && [r.since, r.heartbeat, r.turns, r.tools, r.interns].every(isNum) &&
+    typeof r.isBusy === 'boolean' && [r.joinedAt, r.since, r.heartbeat, r.turns, r.tools, r.interns].every(isNum) &&
     isStr(r.lastLine, 2000)
   return ok ? (r as AgentRecord) : null
 }
@@ -40,7 +40,7 @@ export function mergeRoster(records: (AgentRecord | null)[], me: AgentRecord | n
     const p = presence(r, now)
     if (p) seats.push({ ...r, isAway: p === 'away', isMe: r.id === me?.id })
   }
-  return seats.sort((a, b) => a.since - b.since || a.id.localeCompare(b.id))
+  return seats.sort((a, b) => a.joinedAt - b.joinedAt || a.id.localeCompare(b.id))
 }
 
 /** 32-bit FNV-1a: a stable number per id, for desks and default looks. */

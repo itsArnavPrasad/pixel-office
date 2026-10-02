@@ -23,6 +23,8 @@ export type AgentRecord = {
   state: AgentState
   bubble: string
   isBusy: boolean
+  /** When this session arrived; stable, unlike `since`. */
+  joinedAt: number
   since: number
   heartbeat: number
   turns: number
@@ -43,6 +45,26 @@ export type InboxMessage = {
 
 export type LogLine = { at: number; who: string; text: string }
 
+/** Waiting episodes already announced, by seat id (episode = the seat's `since`). */
+export type AlertMemory = Record<string, { since: number; isReminded: boolean }>
+
+/** ~/.claude/pixel-office/standup/<id>.json */
+export type StandupRequest = { v: 1; id: string; by: string; requestedAt: number }
+
+/** ~/.claude/pixel-office/standup/<request id>/<session id>.json */
+export type StandupAnswer = {
+  v: 1
+  id: string
+  name: string
+  character: string
+  done: string
+  next: string
+  blocked: string
+  at: number
+}
+
+export type Standup = { request: StandupRequest; answers: StandupAnswer[] }
+
 declare module 'claude-code' {
   interface PluginState {
     'pixel-office': {
@@ -50,6 +72,8 @@ declare module 'claude-code' {
       roster: AgentRecord[]
       selected: string | null
       logs: Record<string, LogLine[]>
+      alerted: AlertMemory
+      standup: Standup | null
     }
   }
 }
