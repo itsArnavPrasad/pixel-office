@@ -203,3 +203,8 @@ details.actions > summary .t { font-family: var(--mono); font-size: 0.78em; }
 .flag.run { color: var(--info); }
 .a-list { display: flex; flex-direction: column; gap: 3px; margin: 4px 0 2px 70px; }
 details.tool > summary { grid-template-columns: auto minmax(0, 1fr) auto; }
+
+.card-head { display: flex; align-items: center; gap: 6px; margin-bottom: 3px; }
+.card-head .card-title { margin-bottom: 0; }
+button.link { background: transparent; border: 0; padding: 0 4px; color: var(--vscode-textLink-foreground); font-size: 0.9em; }
+button.link:hover { background: transparent; text-decoration: underline; }

@@ -185,6 +185,7 @@ describe('protocol', () => {
     assert.equal(parseFromWebview({ type: 'newAgent', room: 'relative/x' }), null)
     assert.equal(parseFromWebview({ type: 'newAgent', room: '/a\0b' }), null)
     assert.deepEqual(parseFromWebview({ type: 'openTranscript', id: 'abc' }), { type: 'openTranscript', id: 'abc' })
+    assert.deepEqual(parseFromWebview({ type: 'hideCollisions', extra: 1 }), { type: 'hideCollisions' })
   })
   test('rejects junk, path tricks and oversize text', () => {
     for (const m of [null, 5, {}, { type: 'nuke' }, { type: 'jump', id: '../../etc' }, { type: 'send', id: 'a', text: '' },

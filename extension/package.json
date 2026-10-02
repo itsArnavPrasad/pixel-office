@@ -108,6 +108,11 @@
           "type": "boolean",
           "default": true,
           "description": "Show each agent's token use, read from its transcript."
+        },
+        "pixelOffice.showCollisionRadar": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show the Collision radar banner when two agents edit the same file."
         }
       }
     }

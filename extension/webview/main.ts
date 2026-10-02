@@ -21,9 +21,11 @@ const ICON: Record<string, string> = {
 }
 const STATE_LABEL: Record<string, string> = { 'needs-you': 'needs you', delegating: 'with interns' }
 
-type Saved = { collapsed: string[]; filter: 'conversation' | 'everything' }
+type Saved = { collapsed: string[]; filter: 'conversation' | 'everything'; dismissed: string[] }
 const stored = (vscode.getState() as Partial<Saved> | undefined) ?? {}
-const saved: Saved = { collapsed: stored.collapsed ?? [], filter: stored.filter === 'everything' ? 'everything' : 'conversation' }
+const saved: Saved = {
+  collapsed: stored.collapsed ?? [], filter: stored.filter === 'everything' ? 'everything' : 'conversation', dismissed: stored.dismissed ?? [],
+}
 const save = () => vscode.setState(saved)
 
 let v: ViewState | null = null
@@ -148,16 +150,29 @@ function standupHtml(r: RoomView, seats: Seat[]): string {
 function renderAttention(byId: Map<string, Seat>) {
   const queue = v!.queue.map(id => byId.get(id)).filter((s): s is Seat => !!s)
   const roomOf = (s: Seat) => s.roomName || ''
+  // dismissed collisions stay hidden until a new one appears; "hide forever" is a setting
+  const shownCollisions = v!.showCollisions ? v!.collisions.filter(c => !saved.dismissed.includes(collisionKey(c))) : []
   $('#attention').innerHTML =
     (queue.length
       ? `<div class="card warn"><div class="card-title">❗ Needs you (${queue.length})</div>${queue.slice(0, isMini ? 3 : 6).map(s =>
           `<div class="qrow" data-id="${esc(s.id)}"><b>${esc(short(s.name, 22))}</b> <span class="dim">${esc(roomOf(s))} · waiting ${formatWait(v!.now - s.since)}</span> ${esc(short(s.bubble, 90))}</div>`).join('')}</div>`
       : '') +
-    (v!.collisions.length
-      ? `<div class="card danger"><div class="card-title">⚠ Collision radar</div>${v!.collisions.slice(0, 5).map(c =>
-          `<div>${esc(c.names.join(' & '))} both edited <code>${esc(c.file.split('/').slice(-2).join('/'))}</code></div>`).join('')}</div>`
+    (shownCollisions.length
+      ? `<div class="card danger"><div class="card-head"><span class="card-title">⚠ Collision radar</span><span class="grow"></span>
+          <button class="link" id="col-dismiss" title="Hide these collisions; a new one brings the banner back">Dismiss</button>
+          <button class="link" id="col-hide" title="Never show this banner (Settings → Pixel Office → Show Collision Radar)">Hide forever</button></div>
+          ${shownCollisions.slice(0, 5).map(c => `<div>${esc(c.names.join(' & '))} both edited <code>${esc(c.file.split('/').slice(-2).join('/'))}</code></div>`).join('')}</div>`
       : '')
   for (const el of document.querySelectorAll<HTMLElement>('#attention [data-id]')) el.onclick = () => pick(el.dataset.id!)
+  const dismiss = document.getElementById('col-dismiss')
+  if (dismiss)
+    dismiss.onclick = () => {
+      saved.dismissed = v!.collisions.map(collisionKey)
+      save()
+      render()
+    }
+  const hide = document.getElementById('col-hide')
+  if (hide) hide.onclick = () => post({ type: 'hideCollisions' })
 }
 
 // ── the agent console ──────────────────────────────────────────────
@@ -269,6 +284,9 @@ function briefHtml(s: Seat, task: string, plan: PlanItem[] | null, entries: Entr
     rows.push(`<div class="b-row"><span class="b-k">Problems</span><span class="b-v">${failed.map(e => `<div class="errText" title="${esc(e.text)}">✗ ${esc(e.tool ?? 'tool')}: ${esc(short(firstLine(e.output ?? ''), 110))}</div>`).join('')}</span></div>`)
   return rows.join('')
 }
+
+/** A collision is the same one while the same agents share the same file. */
+const collisionKey = (c: { file: string; ids: string[] }) => `${c.file}|${[...c.ids].sort().join(',')}`
 
 const firstLine = (text: string) => text.split('\n').map(l => l.trim()).find(Boolean) ?? ''
 

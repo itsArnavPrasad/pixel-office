@@ -22,6 +22,8 @@ export type ViewState = {
   isEnabled: boolean
   /** The user's home folder, for showing paths as ~/… */
   home: string
+  /** False once the user hid the collision banner for good (setting pixelOffice.showCollisionRadar). */
+  showCollisions: boolean
 }
 
 export type FromWebview =
@@ -34,6 +36,7 @@ export type FromWebview =
   | { type: 'standup'; room: string | null }
   | { type: 'newAgent'; room: string | null }
   | { type: 'enable' }
+  | { type: 'hideCollisions' }
 
 const ID = /^[A-Za-z0-9._-]{1,100}$/
 const isId = (v: unknown): v is string => typeof v === 'string' && ID.test(v)
@@ -46,6 +49,7 @@ export function parseFromWebview(m: unknown): FromWebview | null {
   switch (r.type) {
     case 'ready':
     case 'enable':
+    case 'hideCollisions':
       return { type: r.type }
     case 'select':
     case 'openPanel':

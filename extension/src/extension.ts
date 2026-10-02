@@ -56,6 +56,7 @@ export function activate(context: vscode.ExtensionContext) {
       type: 'view', now, seats: snap.seats, rooms: rooms(), queue: waitingQueue(snap.seats).map(s => s.id), standup: snap.standup,
       collisions: collisions(snap.seats), insights: extras, selected: chosen,
       chat: chosen ? { id: chosen, ...insights.chat(chosen) } : null, isEnabled: enabled, home: homedir(),
+      showCollisions: config().get<boolean>('showCollisionRadar', true),
     }
   }
 
@@ -227,6 +228,14 @@ export function activate(context: vscode.ExtensionContext) {
         return tick()
       case 'enable':
         return vscode.commands.executeCommand('pixelOffice.enable')
+      case 'hideCollisions': {
+        // a setting, so it holds in every window and can be turned back on in Settings
+        await config().update('showCollisionRadar', false, vscode.ConfigurationTarget.Global)
+        publish(true)
+        const pick = await vscode.window.showInformationMessage('Collision radar banner hidden. Turn it back on any time in Settings.', 'Undo')
+        if (pick === 'Undo') await config().update('showCollisionRadar', true, vscode.ConfigurationTarget.Global)
+        return publish(true)
+      }
     }
   }
 

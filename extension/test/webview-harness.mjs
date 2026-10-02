@@ -57,7 +57,7 @@ const plan = [
   { text: 'Rate limit /login to 5/min per IP', status: 'in_progress' },
   { text: 'Tests for the rate limiter', status: 'pending' },
 ]
-const base = { type: 'view', now: NOW, seats, rooms, queue: ['b-deploy'], standup: null, insights, selected: null, chat: null, isEnabled: true, home: '/Users/dev',
+const base = { type: 'view', now: NOW, seats, rooms, queue: ['b-deploy'], standup: null, insights, selected: null, chat: null, isEnabled: true, home: '/Users/dev', showCollisions: true,
   collisions: [{ file: '/Users/dev/code/web-app/src/auth.ts', ids: ['a-ui', 'c-auth'], names: ['ui-polish', 'auth'] }] }
 const chat = { id: 'c-auth', entries, task: 'yes, add rate limiting to /login: 5 tries per minute per IP', plan }
 const standup = {
@@ -73,6 +73,11 @@ const cases = [
   { name: 'panel-everything', mode: 'full', w: 1500, h: 1100, view: { ...base, selected: 'c-auth', chat }, filter: 'everything' },
   { name: 'panel-standup', mode: 'full', w: 1100, h: 1100, view: { ...base, standup } },
   { name: 'sidebar', mode: 'mini', w: 340, h: 1000, view: base },
+  { name: 'collision-dismissed', mode: 'full', w: 1100, h: 500, view: base,
+    act: "document.getElementById('col-dismiss').click()", expect: "!document.querySelector('#attention .card.danger') && !!document.querySelector('#attention .card.warn')" },
+  { name: 'collision-hidden', mode: 'full', w: 1100, h: 500, view: { ...base, showCollisions: false },
+    expect: "!document.querySelector('#attention .card.danger')" },
+  { name: 'collision-shown', mode: 'full', w: 1100, h: 500, view: base, expect: "!!document.getElementById('col-hide')" },
   { name: 'empty', mode: 'full', w: 900, h: 420, view: { ...base, seats: [], rooms: [], queue: [], collisions: [], isEnabled: false } },
 ]
 
@@ -97,6 +102,8 @@ for (const c of cases) {
   window.acquireVsCodeApi = () => ({ getState: () => (${JSON.stringify(c.filter ? { filter: c.filter } : null)}), setState() {}, postMessage: m => { window.__posted.push(m); if (m.type === 'ready') setTimeout(() => window.postMessage(${JSON.stringify(c.view)}, '*'), 0) } })
 </script>
 <script src="${pathToFileURL(join(here, 'dist/webview.js')).href}"></script>
+<script>setTimeout(() => { ${c.act ?? ''} }, 600)</script>
+<script>setTimeout(() => { if (!(${c.expect ?? 'true'})) document.title = 'ERROR: expectation failed: ' + ${JSON.stringify(c.expect ?? '')}; }, 1000)</script>
 <script>setTimeout(() => { const cv = document.querySelector('canvas'); const ok = (!cv || cv.width > 0) && !document.title.startsWith('ERROR') && document.querySelector('header.top'); document.title = ok ? 'OK ' + (cv ? cv.width : 'no rooms') : (document.title || 'ERROR: nothing drawn') }, 1200)</script>
 </body></html>`)
   const chrome = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome'
