@@ -50,7 +50,22 @@ Everything stays on your machine in `~/.claude/pixel-office/`.
 
 ## Install
 
-**Cursor / VS Code (recommended)**
+**One paste**: copy this into Claude Code and it sets everything up for you:
+
+```text
+Set up Pixel Office for me (https://github.com/itsArnavPrasad/pixel-office).
+1. Clone it into ~/pixel-office (or `git pull` there if it already exists).
+2. Build the extension: cd ~/pixel-office/extension && npm install && npm run package
+3. Install the built VSIX (extension/pixel-office-*.vsix) with `cursor --install-extension <file>`
+   if the `cursor` CLI exists, otherwise `code --install-extension <file>`. If neither CLI is on
+   my PATH, tell me to use Cmd+Shift+P → "Extensions: Install from VSIX…" and give me the path.
+4. Tell me to reload the editor window and click **Enable** when Pixel Office asks (or run
+   "Pixel Office: Enable in All Claude Code Sessions"), then open the 🏢 view in the activity bar.
+   New Claude Code sessions will join the office.
+If any step fails, show me the error and fix it before moving on.
+```
+
+**Cursor / VS Code (by hand)**
 1. Build the extension: `cd extension && npm install && npm run package`
 2. Install it: Cmd+Shift+P → **Extensions: Install from VSIX…** → `extension/pixel-office-0.2.0.vsix`
    (or `cursor --install-extension extension/pixel-office-0.2.0.vsix`), then reload the window.
