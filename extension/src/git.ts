@@ -55,3 +55,10 @@ export async function changesIn(cwd: string, now = Date.now()): Promise<Changes 
   cache.set(cwd, { at: now, value })
   return value
 }
+
+/** The room a session in `dir` lands in: the repository's main tree (worktrees included), else `dir` itself. */
+export async function roomFor(dir: string): Promise<string> {
+  const common = (await git(dir, ['rev-parse', '--path-format=absolute', '--git-common-dir'])).trim()
+  if (common.endsWith('/.git')) return common.slice(0, -5)
+  return (await git(dir, ['rev-parse', '--show-toplevel'])).trim() || dir
+}

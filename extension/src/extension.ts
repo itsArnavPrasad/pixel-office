@@ -7,7 +7,7 @@ import * as vscode from 'vscode'
 import { alertsDue, formatWait, waitingQueue } from '../../pixel-office/hooks/core/alerts'
 import { groupRooms, uniqueName } from '../../pixel-office/hooks/core/rooms'
 import { LOOK_IDS } from '../../pixel-office/hooks/core/sprites'
-import { branchIn } from './git'
+import { branchIn, roomFor } from './git'
 import type { AlertMemory } from '../../pixel-office/types'
 import { collisions } from './collisions'
 import { Insights } from './insights'
@@ -138,13 +138,19 @@ export function activate(context: vscode.ExtensionContext) {
   async function newAgent(room: string | null) {
     const roomList = groupRooms(snap.seats)
     let target = knownRoom(room)
+    let cwd = target
     if (!target) {
       const folders = (vscode.workspace.workspaceFolders ?? []).map(f => f.uri.fsPath)
-      const picks = [...new Set([...roomList.map(r => r.id), ...folders])]
-      if (!picks.length) return void vscode.window.showInformationMessage('Open a folder first: a new agent starts in a repository.')
-      const pick = picks.length === 1 ? picks[0] : await vscode.window.showQuickPick(picks.map(p => ({ label: basename(p), description: p, p })), { title: 'New agent: which room?' }).then(x => x?.p)
+      const picks = [...new Set([...roomList.map(r => r.id), ...folders])].map(p => ({ label: basename(p), description: p, p }))
+      const other = { label: '$(new-folder) New room: choose a folder…', description: '', p: '' }
+      const pick = picks.length ? await vscode.window.showQuickPick([...picks, other], { title: 'New agent: which room?' }) : other
       if (!pick) return
-      target = pick
+      if (pick === other) {
+        const dir = await vscode.window.showOpenDialog({ canSelectFolders: true, canSelectFiles: false, title: 'New agent: start it in which folder?', openLabel: 'Start here' })
+        if (!dir?.[0]) return
+        cwd = dir[0].fsPath
+        target = await roomFor(cwd) // the room its session will report, so it claims this ticket
+      } else cwd = target = pick.p
     }
     const taken = snap.seats.filter(s => s.room === target).map(s => s.name)
     const name = await vscode.window.showInputBox({ title: `New agent in ${basename(target)}`, prompt: 'Its name in the office', value: uniqueName(`${basename(target)}-agent`, taken), validateInput: v => (v.trim() && v.length <= 40 ? undefined : '1–40 characters') })
@@ -162,7 +168,7 @@ export function activate(context: vscode.ExtensionContext) {
         vscode.window.showErrorMessage('Could not open a Claude Code tab: is the Claude Code extension installed?'),
       )
     } else {
-      const term = vscode.window.createTerminal({ name: `claude · ${name.trim()}`, cwd: target })
+      const term = vscode.window.createTerminal({ name: `claude · ${name.trim()}`, cwd: cwd! })
       term.show()
       term.sendText('claude')
     }
