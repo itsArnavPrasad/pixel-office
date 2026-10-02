@@ -25,7 +25,11 @@ export function parseRecord(text: string): AgentRecord | null {
     isStr(r.character, 50) && STATES.includes(r.state as AgentState) && isStr(r.bubble) &&
     typeof r.isBusy === 'boolean' && [r.joinedAt, r.since, r.heartbeat, r.turns, r.tools, r.interns].every(isNum) &&
     isStr(r.lastLine, 2000)
-  return ok ? (r as AgentRecord) : null
+  if (!ok) return null
+  // optional since 0.2: fill what an older mod did not write
+  const pid = isNum(r.pid) ? r.pid : 0
+  const files = Array.isArray(r.files) ? r.files.filter((f): f is string => isStr(f, 4096)).slice(0, 8) : []
+  return { ...(r as AgentRecord), pid, files }
 }
 
 export type Seat = AgentRecord & { isAway: boolean; isMe: boolean }

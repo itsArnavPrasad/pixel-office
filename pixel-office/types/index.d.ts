@@ -31,6 +31,10 @@ export type AgentRecord = {
   tools: number
   interns: number
   lastLine: string
+  /** The Claude process id, so an editor can find the terminal it runs in (0 = unknown). */
+  pid: number
+  /** The last absolute paths this session edited, newest first. */
+  files: string[]
 }
 
 /** One message, ~/.claude/pixel-office/inbox/<to>/<id>.json. */

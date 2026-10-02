@@ -93,6 +93,21 @@ describe('agent reducer', () => {
     expect(reduce(a, { kind: 'turn-done', text: 'ok' }, T + 5).state).toBe('done')
     expect(reduce(a, { kind: 'prompt', text: 'yes' }, T + 5).state).toBe('thinking')
   })
+  test('edits remember the last 8 absolute files, newest first, deduped', () => {
+    let a = agent()
+    for (const f of ['/r/a.ts', '/r/b.ts', '/r/a.ts']) a = reduce(a, { kind: 'tool', tool: 'Edit', input: { file_path: f } }, T)
+    expect(a.files).toEqual(['/r/a.ts', '/r/b.ts'])
+    a = reduce(a, { kind: 'tool', tool: 'Read', input: { file_path: '/r/c.ts' } }, T)
+    a = reduce(a, { kind: 'tool', tool: 'Write', input: { file_path: 'relative.ts' } }, T)
+    expect(a.files).toEqual(['/r/a.ts', '/r/b.ts'])
+    for (let i = 0; i < 12; i++) a = reduce(a, { kind: 'tool', tool: 'NotebookEdit', input: { notebook_path: `/n/${i}.ipynb` } }, T)
+    expect(a.files.length).toBe(8)
+    expect(a.files[0]).toBe('/n/11.ipynb')
+  })
+  test('start records the pid and keeps files', () => {
+    const a = reduce(agent({ files: ['/x'] }), { kind: 'start', name: 'n', cwd: '/c', character: 'dev-1', pid: 4242 }, T)
+    expect([a.pid, a.files]).toEqual([4242, ['/x']])
+  })
   test('tool-done while idle changes nothing', () => {
     const a = agent({ state: 'idle' })
     expect(reduce(a, { kind: 'tool-done', isError: false }, T)).toBe(a)
@@ -134,6 +149,10 @@ describe('roster', () => {
     expect(parseRecord(JSON.stringify({ ...good, state: 'dancing' }))).toBe(null)
     expect(parseRecord(JSON.stringify({ ...good, heartbeat: 'soon' }))).toBe(null)
     expect(parseRecord(JSON.stringify({ ...good, joinedAt: undefined }))).toBe(null)
+    // an older mod's record, without pid / files, still parses with defaults
+    const { pid: _p, files: _f, ...old } = good
+    expect(parseRecord(JSON.stringify(old))).toEqual({ ...good, pid: 0, files: [] })
+    expect(parseRecord(JSON.stringify({ ...good, files: ['/ok', 5, 'x'.repeat(5000)] }))!.files).toEqual(['/ok'])
     expect(parseRecord(JSON.stringify({ ...good, id: '' }))).toBe(null)
     expect(parseRecord(JSON.stringify({ ...good, name: 'x'.repeat(101) }))).toBe(null)
   })

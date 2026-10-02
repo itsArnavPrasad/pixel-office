@@ -4,7 +4,7 @@ import { activityFor } from './signals'
 import { bubble, firstSentence } from './text'
 
 export type Signal =
-  | { kind: 'start'; name: string; cwd: string; character: string }
+  | { kind: 'start'; name: string; cwd: string; character: string; pid?: number }
   | { kind: 'prompt'; text: string }
   | { kind: 'tool'; tool: string; input?: Record<string, unknown> }
   | { kind: 'tool-done'; isError: boolean }
@@ -18,6 +18,14 @@ export const HOLD_MS = 3000 // done / stressed / arriving show this long
 export const AWAY_MS = 20000 // no heartbeat this long → away
 export const PRUNE_MS = 10 * 60 * 1000 // no heartbeat this long → gone
 
+const EDITS = ['Edit', 'MultiEdit', 'Write', 'NotebookEdit']
+const MAX_FILES = 8
+
+function editedPath(input: Record<string, unknown> = {}): string {
+  const p = input.file_path ?? input.notebook_path
+  return typeof p === 'string' && p.startsWith('/') && p.length <= 4096 ? p : ''
+}
+
 const WORKING: AgentState[] = ['thinking', 'typing', 'reading', 'writing', 'browsing', 'delegating', 'working']
 
 export function isWorking(state: AgentState): boolean {
@@ -27,7 +35,7 @@ export function isWorking(state: AgentState): boolean {
 export function newAgent(id: string, now: number): AgentRecord {
   return {
     v: 1, id, name: 'claude', cwd: '', character: 'dev-1', state: 'arriving', bubble: 'Morning!',
-    isBusy: false, joinedAt: now, since: now, heartbeat: now, turns: 0, tools: 0, interns: 0, lastLine: '',
+    isBusy: false, joinedAt: now, since: now, heartbeat: now, turns: 0, tools: 0, interns: 0, lastLine: '', pid: 0, files: [],
   }
 }
 
@@ -38,12 +46,14 @@ export function reduce(a: AgentRecord, s: Signal, now: number): AgentRecord {
   switch (s.kind) {
     case 'start':
       // a restart or hot reload keeps the arrival time, so seniority is stable
-      return { ...newAgent(a.id, now), name: s.name, cwd: s.cwd, character: s.character, turns: a.turns, tools: a.tools, joinedAt: a.joinedAt || now }
+      return { ...newAgent(a.id, now), name: s.name, cwd: s.cwd, character: s.character, turns: a.turns, tools: a.tools, joinedAt: a.joinedAt || now, pid: s.pid ?? a.pid ?? 0, files: a.files ?? [] }
     case 'prompt':
       return to('thinking', bubble(s.text), { isBusy: true, turns: a.turns + 1 })
     case 'tool': {
       const act = activityFor(s.tool, s.input)
-      return to(act.state, act.bubble, { isBusy: true, tools: a.tools + 1 })
+      const path = EDITS.includes(s.tool) ? editedPath(s.input) : ''
+      const files = path ? [path, ...(a.files ?? []).filter(f => f !== path)].slice(0, MAX_FILES) : a.files ?? []
+      return to(act.state, act.bubble, { isBusy: true, tools: a.tools + 1, files })
     }
     case 'tool-done':
       if (s.isError) return to('stressed', 'Hmm, that failed…')

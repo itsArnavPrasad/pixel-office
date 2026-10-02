@@ -33,6 +33,7 @@ const LOG_KEEP = 30
 const MAX_AGENTS = 64
 const GC_EVERY = 60 // polls
 const CHIME = 'sounds/chime.wav'
+const UI_FRESH_MS = 10_000 // an editor window heartbeating this recently does the chime + notification
 
 const ICON: Record<AgentRecord['state'], string> = {
   arriving: '🚶', idle: '○', thinking: '💭', typing: '⌨', reading: '📖', writing: '✎', browsing: '🌐',
@@ -58,6 +59,7 @@ const rt = {
 const agentsDir = () => `${rt.root}/agents`
 const inboxDir = (id: string) => `${rt.root}/inbox/${id}`
 const standupDir = () => `${rt.root}/standup`
+const uiDir = () => `${rt.root}/ui`
 
 async function log($: $, id: string, who: string, text: string) {
   const line: LogLine = { at: await $.clock.now(), who, text: truncate(clean(text), 500) }
@@ -154,7 +156,7 @@ async function alert($: $, seats: Seat[], now: number) {
   const due = alertsDue(waitingQueue(seats), await read($, alerted), now)
   if (JSON.stringify(due.memory) !== JSON.stringify(await read($, alerted))) await update($, alerted, () => due.memory)
   if (!rt.isAlertsOn || (!due.fresh.length && !due.remind.length)) return
-  const isLeader = alertLeader(seats) === rt.myId
+  const isLeader = alertLeader(seats) === rt.myId && !(await isEditorWatching($, now))
   for (const s of due.fresh) {
     if (!s.isMe) $.ui.toast(`❗ ${s.name} needs you: ${s.bubble}`)
     if (isLeader) void $.process.run(notifyArgv(`❗ ${s.name} needs you`, s.bubble || 'Waiting for you')).catch(() => {})
@@ -165,6 +167,12 @@ async function alert($: $, seats: Seat[], now: number) {
     if (isLeader) void $.process.run(notifyArgv(`❗ ${s.name} still waiting · ${waited}`, s.bubble || 'Waiting for you')).catch(() => {})
   }
   if (isLeader && rt.isSoundOn) void $.audio.play({ asset: CHIME }).catch(() => {})
+}
+
+/** Whether a Pixel Office editor window is open (it announces itself in ui/). */
+async function isEditorWatching($: $, now: number): Promise<boolean> {
+  const peers = await $.fs.list(uiDir()).catch(() => [])
+  return peers.some(f => f.kind === 'file' && f.name.endsWith('.json') && now - f.mtimeMs < UI_FRESH_MS)
 }
 
 async function openOn($: $, id: string) {
@@ -301,7 +309,10 @@ async function start($: $, cwd: string) {
   rt.isSoundOn = (await $.store.get('sound')) !== 'off'
   const name = String((await $.store.get(`name:${cwd}`)) ?? (basename(cwd) || 'claude'))
   const character = String((await $.store.get(`look:${cwd}`)) ?? LOOK_IDS[hash(cwd) % LOOK_IDS.length])
-  await signal($, { kind: 'start', name: truncate(name, 40), cwd, character })
+  // $PPID of a child shell is this Claude process: what an editor matches its terminals against
+  const ran = await $.process.run(['sh', '-c', 'echo $PPID']).catch(() => null)
+  const pid = Number.parseInt(ran?.stdout.trim() ?? '', 10)
+  await signal($, { kind: 'start', name: truncate(name, 40), cwd, character, pid: Number.isFinite(pid) ? pid : 0 })
   await $.command.register({ name: 'office', description: 'Open the Pixel Office: every Claude session as a character you can talk to' })
   $.clock.every(HEARTBEAT_MS, () => signal($, { kind: 'tick' }))
   $.clock.every(POLL_MS, () => poll($))

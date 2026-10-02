@@ -41,6 +41,7 @@ function world(on: On) {
   on('process.run', ($, e) => {
     if (e.argv[0] === 'rm') for (const p of e.argv.slice(3)) for (const k of [...files.keys()]) if (k === p || k.startsWith(`${p}/`)) files.delete(k)
     if (e.argv[0] === 'osascript') notified.push([...e.argv.slice(-2)])
+    if (e.argv[0] === 'sh') return ok({ exitCode: 0, stdout: '31337\n', stderr: '' })
     return ok({ exitCode: 0, stdout: '', stderr: '' })
   })
   on('session.id', () => ok(ME))
@@ -80,7 +81,7 @@ describe('presence', () => {
   test('session.start writes this session into the office', async ($, on) => {
     const w = world(on)
     await boot($)
-    expect(w.mine()).toMatchObject({ id: ME, name: 'api-server', state: 'arriving', v: 1 })
+    expect(w.mine()).toMatchObject({ id: ME, name: 'api-server', state: 'arriving', v: 1, pid: 31337, files: [] })
   })
 
   test('a tool call acts out, then settles back to thinking', async ($, on) => {
@@ -205,6 +206,16 @@ describe('attention queue', () => {
     expect(w.notified.length).toBe(2)
     expect(w.notified[1]![1]).toContain('still waiting')
     expect(w.sound.chimes).toBe(2)
+  })
+
+  test('an open editor window takes over the chime and notification', async ($, on) => {
+    const w = world(on)
+    await boot($)
+    w.files.set(`${ROOT}/ui/window-1.json`, '{"v":1}')
+    w.put({ ...newAgent('web', T + 50), name: 'web', state: 'needs-you', bubble: 'Which DB?' })
+    await w.clock.advance(1100)
+    expect([w.notified.length, w.sound.chimes]).toEqual([0, 0])
+    expect(w.toasts.some(t => t.includes('web needs you'))).toBe(true)
   })
 
   test('a session that is not the leader toasts but stays quiet', async ($, on) => {
