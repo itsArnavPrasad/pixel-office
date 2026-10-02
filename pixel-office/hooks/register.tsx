@@ -150,7 +150,8 @@ async function deliver($: $) {
       }
       await log($, rt.myId, m.from === 'you' ? 'you' : m.fromName, m.text)
       $.ui.toast(`📨 Message for this session${m.from === 'you' ? '' : ` from ${m.fromName}`}`)
-      void $.prompt.submit({ text: asPrompt(m) })
+      // your own words read bare; another session's keep Claude Code's plugin frame
+      void $.prompt.submit(m.from === 'you' ? { text: asPrompt(m), asUser: true } : { text: asPrompt(m) })
     }
   } finally {
     rt.isDelivering = false
@@ -293,7 +294,7 @@ async function send($: $, to: string, text: string) {
   if (!m) return
   await log($, to, 'you', m.text)
   if (to === rt.myId) {
-    void $.prompt.submit({ text: m.text })
+    void $.prompt.submit({ text: m.text, asUser: true })
     return
   }
   await $.fs.write(`${inboxDir(to)}/${m.id}.json`, JSON.stringify(m))
@@ -402,7 +403,7 @@ async function identify($: $, cwd: string, keep: { name: string; character: stri
   const ran = await $.process.run(['sh', '-c', 'echo $PPID']).catch(() => null)
   const pid = Number.parseInt(ran?.stdout.trim() ?? '', 10)
   await signal($, { kind: 'start', name: truncate(name, 40), cwd, character, pid: Number.isFinite(pid) ? pid : 0, room, roomName })
-  if (ticket?.task) void $.prompt.submit({ text: ticket.task })
+  if (ticket?.task) void $.prompt.submit({ text: ticket.task, asUser: true })
 }
 
 /** Names already used by live agents in this room, so a newcomer gets a distinct one. */
