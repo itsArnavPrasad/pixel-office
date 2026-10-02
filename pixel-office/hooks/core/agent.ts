@@ -1,7 +1,7 @@
 // One session's character: a pure reducer from session signals to its record.
 import type { AgentRecord, AgentState } from '../../types'
 import { activityFor } from './signals'
-import { basename, bubble, firstSentence } from './text'
+import { basename, bubble, clean, firstSentence, taskOf, truncate } from './text'
 
 export type Signal =
   | { kind: 'start'; name: string; cwd: string; character: string; pid?: number; room?: string; roomName?: string }
@@ -11,6 +11,7 @@ export type Signal =
   | { kind: 'needs-you'; text: string }
   | { kind: 'turn-done'; text: string; reason?: 'answer' | 'aborted' | 'refusal' | 'error' }
   | { kind: 'interns'; delta: number }
+  | { kind: 'title'; text: string }
   | { kind: 'end' }
   | { kind: 'tick' }
 
@@ -35,7 +36,7 @@ export function isWorking(state: AgentState): boolean {
 export function newAgent(id: string, now: number): AgentRecord {
   return {
     v: 1, id, name: 'claude', cwd: '', character: 'dev-1', state: 'arriving', bubble: 'Morning!', detail: '',
-    isBusy: false, joinedAt: now, since: now, heartbeat: now, turns: 0, tools: 0, interns: 0, lastLine: '', pid: 0, files: [], room: '', roomName: '',
+    isBusy: false, joinedAt: now, since: now, heartbeat: now, turns: 0, tools: 0, interns: 0, lastLine: '', pid: 0, files: [], room: '', roomName: '', task: '', title: '',
   }
 }
 
@@ -47,9 +48,11 @@ export function reduce(a: AgentRecord, s: Signal, now: number): AgentRecord {
     case 'start':
       // a restart or hot reload keeps the arrival time, so seniority is stable
       return { ...newAgent(a.id, now), name: s.name, cwd: s.cwd, character: s.character, turns: a.turns, tools: a.tools, joinedAt: a.joinedAt || now, pid: s.pid ?? a.pid ?? 0, files: a.files ?? [],
-        room: s.room || s.cwd, roomName: s.roomName || basename(s.cwd) }
+        room: s.room || s.cwd, roomName: s.roomName || basename(s.cwd), task: a.task ?? '', title: a.title ?? '' }
     case 'prompt':
-      return to('thinking', bubble(s.text), { isBusy: true, turns: a.turns + 1 })
+      return to('thinking', bubble(s.text), { isBusy: true, turns: a.turns + 1, task: taskOf(s.text) || a.task || '' })
+    case 'title':
+      return { ...a, title: truncate(clean(s.text), 80) }
     case 'tool': {
       const act = activityFor(s.tool, s.input)
       const path = EDITS.includes(s.tool) ? editedPath(s.input) : ''

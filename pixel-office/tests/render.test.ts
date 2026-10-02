@@ -71,6 +71,13 @@ describe('encoders', () => {
     const words = [...toRasterWords(f)]
     expect([0, 1, 2, 3, 4].map(c => String.fromCodePoint(words[c * 3]!))).toEqual([' ', 'a', 'b', 'c', '▀'])
   })
+  test('the desk shows your title, else the automatic one, cut to the desk', () => {
+    const L = layout(48, 2)
+    const seats = [seat(0, 'typing', { task: 'write tests for the auth controller' }), seat(1, 'idle', { task: 'ignored', title: 'Auth' })]
+    const texts = drawOffice(L, seats, assignDesks(['s0', 's1'], L.desks.length), NOW).texts.map(t => t.text)
+    expect(texts).toContain('write tests for…')
+    expect(texts).toContain('Auth')
+  })
   test('raster cells length is columns × rows × 12 bytes', () => {
     const L = layout(80, 5)
     const f = drawOffice(L, [0, 1, 2, 3, 4].map(i => seat(i, ALL[i]!)), assignDesks(['s0', 's1', 's2', 's3', 's4'], L.desks.length), NOW)

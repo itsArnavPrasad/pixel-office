@@ -34,6 +34,15 @@ export function firstSentence(text: string): string {
   return clean(match?.[1] ?? line)
 }
 
+/** A desk title from a prompt: its first sentence, or '' for a command or a reply too short to name the work ("yes", "go on"). */
+export function taskOf(prompt: string): string {
+  const body = prompt.replace(/^\s*\[[^\]\n]*\]\s*\n/, '') // Pixel Office's "[Sent to you…]" label
+  if (/^\s*[/<]/.test(body)) return ''
+  const s = redact(firstSentence(body))
+  // ponytail: three words = "names the work"; a real summary needs a model call
+  return s.split(' ').length >= 3 ? truncate(s, 80) : ''
+}
+
 /** A bubble: cleaned, redacted, cut to fit. */
 export function bubble(text: string, max = 60): string {
   return truncate(redact(clean(text)), max)

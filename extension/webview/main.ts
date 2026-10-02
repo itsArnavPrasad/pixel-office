@@ -239,6 +239,7 @@ function renderConsole(byId: Map<string, Seat>) {
   for (const b of box.querySelectorAll<HTMLButtonElement>('.seg button')) b.classList.toggle('on', b.dataset.f === saved.filter)
 
   $('.c-brief', box).innerHTML = briefHtml(s, chat?.task ?? '', chat?.plan ?? null, entries)
+  $<HTMLButtonElement>('.b-retitle', box).onclick = () => post({ type: 'retitle', id: s.id })
 
   const ta = $<HTMLTextAreaElement>('textarea', box)
   ta.placeholder = `Message ${s.name}…  (Enter to send · Shift+Enter for a new line)`
@@ -269,6 +270,9 @@ function renderConsole(byId: Map<string, Seat>) {
 function briefHtml(s: Seat, task: string, plan: PlanItem[] | null, entries: Entry[]): string {
   const rows: string[] = []
   const now = s.state === 'needs-you' ? `<span class="warnText">❗ ${esc(s.bubble || 'Waiting for you')}</span>` : esc(s.bubble || (s.isBusy ? 'Working' : 'Idle'))
+  const title = s.title || s.task
+  rows.push(`<div class="b-row"><span class="b-k">Desk</span><span class="b-v">${title ? esc(title) : '<span class="dim">no title yet</span>'}${s.title ? '' : ' <span class="dim">(auto)</span>'}
+    <button class="b-retitle link" title="Rename what its desk says; clear it to go back to automatic">✎ Rename</button></span></div>`)
   rows.push(`<div class="b-row"><span class="b-k">Now</span><span class="b-v" title="${esc(s.detail || '')}">${now}${s.detail ? ` <span class="dim detail">${esc(short(s.detail, 90))}</span>` : ''}</span></div>`)
   if (task) rows.push(`<div class="b-row"><span class="b-k">Task</span><span class="b-v">${esc(short(task, 220))}</span></div>`)
   if (plan?.length) {

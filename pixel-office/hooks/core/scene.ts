@@ -15,6 +15,7 @@ export const WALL_H = 12
 export const MAX_ROWS = 64 // effectively uncapped: every agent gets a desk
 export const IDLE_ZZZ_MS = 60_000
 const BUBBLE_W = CELL_W - 2
+const DESK_TEXT_W = 16
 
 /** A standup presenter: stands up and says `text` (yellow when blocked, else green). */
 export type Spotlight = { id: string; text: string; isBlocked: boolean }
@@ -84,6 +85,9 @@ export function drawOffice(
     }
 
     blit(f, DESK, at.x + 2, at.y + 14, FURNITURE_PALETTE, dim)
+    // its title, written on the desk's front panel (16 cells wide, one text row)
+    const title = truncate(s.title || s.task || '', DESK_TEXT_W)
+    if (title) text(f, at.x + 3 + Math.floor((DESK_TEXT_W - [...title].length) / 2), at.y / 2 + 8, title, s.isAway ? 0x9a9a9a : 0xf3e2c0, shade(FURNITURE_PALETTE.F!, dim))
     blit(f, MONITOR, at.x + 3, at.y + 8, FURNITURE_PALETTE, dim)
     const screen = SCREEN[s.state]
     if (screen && !s.isAway) {

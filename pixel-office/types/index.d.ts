@@ -41,6 +41,10 @@ export type AgentRecord = {
   room: string
   /** The room's display name: the repository's name, else the folder's. */
   roomName: string
+  /** What it is working on, from its latest prompt that names the work: the desk title unless `title` is set. */
+  task: string
+  /** A desk title you set by hand ('' = none, so `task` shows). */
+  title: string
 }
 
 /** One message, ~/.claude/pixel-office/inbox/<to>/<id>.json. */

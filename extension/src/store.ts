@@ -114,6 +114,13 @@ export class OfficeStore {
     return ticket
   }
 
+  /** Sets a session's desk title by hand; '' removes it, so the automatic one shows again. */
+  async retitle(id: string, title: string): Promise<void> {
+    if (!ID.test(id)) return
+    const path = join(this.root, 'titles', `${id}.txt`)
+    await (title.trim() ? writeAtomic(path, title.trim().slice(0, 80)) : rm(path, { force: true }))
+  }
+
   /** Removes this window's heartbeat when it closes. */
   async leave() {
     await rm(join(this.root, 'ui', `${this.id}.json`), { force: true })

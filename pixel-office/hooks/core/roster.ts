@@ -33,7 +33,9 @@ export function parseRecord(text: string): AgentRecord | null {
   const room = isStr(r.room, 4096) && r.room ? r.room : (r.cwd as string)
   const roomName = isStr(r.roomName, 100) && r.roomName ? r.roomName : basename(room)
   const detail = isStr(r.detail) ? r.detail : ''
-  return { ...(r as AgentRecord), pid, files, room, roomName, detail }
+  const task = isStr(r.task, 200) ? r.task : ''
+  const title = isStr(r.title, 200) ? r.title : ''
+  return { ...(r as AgentRecord), pid, files, room, roomName, detail, task, title }
 }
 
 export type Seat = AgentRecord & { isAway: boolean; isMe: boolean }

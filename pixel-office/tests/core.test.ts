@@ -5,7 +5,7 @@ import { HOLD_MS, PRUNE_MS, byUrgency, newAgent, presence, reduce } from '../hoo
 import { asPrompt, makeMessage, messageId, parseMessage, pendingFiles } from '../hooks/core/inbox'
 import { assignDesks, hash, mergeRoster, parseRecord } from '../hooks/core/roster'
 import { activityFor, describeCommand } from '../hooks/core/signals'
-import { bubble, clean, firstSentence, redact, truncate, wrap } from '../hooks/core/text'
+import { bubble, clean, firstSentence, redact, taskOf, truncate, wrap } from '../hooks/core/text'
 
 const T = 1_759_400_000_000
 const agent = (over: Partial<AgentRecord> = {}): AgentRecord => ({ ...newAgent('a1', T), ...over })
@@ -89,6 +89,17 @@ describe('signals', () => {
 })
 
 describe('agent reducer', () => {
+  test('desk title: a prompt that names the work retitles, short replies and commands keep it; yours wins until cleared', () => {
+    expect(taskOf('[Sent to you through Pixel Office]\n\nWrite tests for the auth controller. Then lint.')).toBe('Write tests for the auth controller.')
+    for (const t of ['yes', 'go on', '/office', '<command-name>x</command-name>']) expect(taskOf(t)).toBe('')
+    let a = reduce(agent({ cwd: '/r' }), { kind: 'prompt', text: 'fix the login redirect bug' }, T)
+    a = reduce(a, { kind: 'prompt', text: 'ok' }, T + 1)
+    expect(a.task).toBe('fix the login redirect bug')
+    a = reduce(a, { kind: 'title', text: '  Auth  work ' }, T + 2)
+    expect(a.title).toBe('Auth work')
+    expect(reduce(a, { kind: 'start', name: 'n', cwd: '/r', character: 'dev-1' }, T + 3)).toMatchObject({ title: 'Auth work', task: 'fix the login redirect bug' })
+    expect(reduce(a, { kind: 'title', text: '' }, T + 4).title).toBe('')
+  })
   test('start → arriving, then idle after the hold; a restart keeps joinedAt', () => {
     expect(reduce(agent({ joinedAt: T - 999 }), { kind: 'start', name: 'x', cwd: '/x', character: 'dev-1' }, T).joinedAt).toBe(T - 999)
     // state saved before joinedAt existed

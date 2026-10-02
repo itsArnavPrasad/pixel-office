@@ -64,6 +64,7 @@ const inboxDir = (id: string) => `${rt.root}/inbox/${id}`
 const standupDir = () => `${rt.root}/standup`
 const uiDir = () => `${rt.root}/ui`
 const spawnDir = () => `${rt.root}/spawn`
+const titlesDir = () => `${rt.root}/titles`
 
 async function log($: $, id: string, who: string, text: string) {
   const line: LogLine = { at: await $.clock.now(), who, text: truncate(clean(text), 500) }
@@ -123,9 +124,17 @@ async function poll($: $) {
   if (status !== rt.lastStatus) $.ui.status((rt.lastStatus = status) || undefined)
 
   await alert($, seats, now)
+  await retitle($)
   await deliver($)
   await pollStandup($, now)
   if (++rt.polls % GC_EVERY === 0) await sweep($, now)
+}
+
+/** A desk title set by hand in an editor (titles/<id>.txt; gone = back to the automatic one). */
+async function retitle($: $) {
+  if (!rt.myId) return
+  const text = truncate(clean(await $.fs.read(`${titlesDir()}/${rt.myId}.txt`).catch(() => '')), 80)
+  if (text !== ((await read($, me))?.title ?? '')) await signal($, { kind: 'title', text })
 }
 
 /** Messages addressed to this session, oldest first, each delivered once. */

@@ -14,13 +14,13 @@ const T0 = NOW - 600_000
 const agent = (id, name, character, state, bubble, over = {}) => ({
   v: 1, id, name, cwd: '/Users/dev/code/web-app', character, state, bubble, detail: '', isBusy: state !== 'idle', joinedAt: T0 + id.length,
   since: NOW - 4000, heartbeat: NOW, turns: 7, tools: 52, interns: 0, lastLine: '', pid: 0, files: [], isAway: false, isMe: false,
-  room: '/Users/dev/code/web-app', roomName: 'web-app', ...over,
+  room: '/Users/dev/code/web-app', roomName: 'web-app', task: '', title: '', ...over,
 })
 const API = { cwd: '/Users/dev/code/api', room: '/Users/dev/code/api', roomName: 'api' }
 const seats = [
-  agent('a-ui', 'ui-polish', 'dev-1', 'typing', 'Running tests', { detail: '$ npm test -- Settings.spec.tsx', files: ['/Users/dev/code/web-app/src/auth.ts', '/Users/dev/code/web-app/src/Settings.tsx'] }),
+  agent('a-ui', 'ui-polish', 'dev-1', 'typing', 'Running tests', { task: 'Polish the settings page layout', detail: '$ npm test -- Settings.spec.tsx', files: ['/Users/dev/code/web-app/src/auth.ts', '/Users/dev/code/web-app/src/Settings.tsx'] }),
   agent('b-deploy', 'deploy', 'dev-2', 'needs-you', 'Allow Bash: rm -rf dist?', { since: NOW - 134_000 }),
-  agent('c-auth', 'auth', 'dev-3', 'writing', 'Editing auth.ts', { interns: 2, detail: '/Users/dev/code/web-app/src/auth.ts', files: ['/Users/dev/code/web-app/src/auth.ts'] }),
+  agent('c-auth', 'auth', 'dev-3', 'writing', 'Editing auth.ts', { task: 'Fix the login redirect loop', title: 'Auth fix', interns: 2, detail: '/Users/dev/code/web-app/src/auth.ts', files: ['/Users/dev/code/web-app/src/auth.ts'] }),
   agent('d-docs', 'docs', 'dev-5', 'idle', '', { since: NOW - 300_000 }),
   agent('e-api', 'api', 'dev-4', 'reading', 'Reading routes.ts', { ...API }),
   agent('f-db', 'migrations', 'dev-6', 'done', 'Migration 042 applied.', { ...API }),

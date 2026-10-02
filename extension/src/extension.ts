@@ -175,6 +175,18 @@ export function activate(context: vscode.ExtensionContext) {
     void vscode.window.showInformationMessage(`${name.trim()} is on the way to ${basename(target)}. It takes its desk when its session starts.`)
   }
 
+  /** The title on an agent's desk: yours until you clear it, then what it is working on. */
+  async function retitle(id: string) {
+    const s = snap.seats.find(x => x.id === id)
+    if (!s) return
+    const title = await vscode.window.showInputBox({
+      title: `Desk title for ${s.name}`, value: s.title, placeHolder: s.task || 'What it is working on',
+      prompt: 'Leave empty to show what it is working on, updated as it goes', validateInput: v => (v.length <= 80 ? undefined : 'At most 80 characters'),
+    })
+    if (title === undefined) return
+    await store.retitle(id, title)
+  }
+
   async function openTranscript(id: string) {
     const path = insights.transcriptPath(id)
     if (!path) return void vscode.window.showInformationMessage('No transcript yet: it appears after the first turn.')
@@ -229,6 +241,8 @@ export function activate(context: vscode.ExtensionContext) {
       }
       case 'jump':
         return jump(m.id)
+      case 'retitle':
+        return retitle(m.id)
       case 'standup':
         await store.requestStandup('editor', knownRoom(m.room))
         return tick()

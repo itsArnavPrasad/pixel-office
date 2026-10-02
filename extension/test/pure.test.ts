@@ -183,6 +183,8 @@ describe('protocol', () => {
     assert.deepEqual(parseFromWebview({ type: 'standup', room: null }), { type: 'standup', room: null })
     assert.deepEqual(parseFromWebview({ type: 'standup' }), { type: 'standup', room: null })
     assert.equal(parseFromWebview({ type: 'newAgent', room: 'relative/x' }), null)
+    assert.deepEqual(parseFromWebview({ type: 'retitle', id: 'abc-1' }), { type: 'retitle', id: 'abc-1' })
+    assert.equal(parseFromWebview({ type: 'retitle', id: '../x' }), null)
     assert.equal(parseFromWebview({ type: 'newAgent', room: '/a\0b' }), null)
     assert.deepEqual(parseFromWebview({ type: 'openTranscript', id: 'abc' }), { type: 'openTranscript', id: 'abc' })
     assert.deepEqual(parseFromWebview({ type: 'hideCollisions', extra: 1 }), { type: 'hideCollisions' })
