@@ -15,11 +15,14 @@ who is waiting for you and who just finished, and you can talk to any of them wi
 | | |
 |---|---|
 | **Rooms per repository** | Sessions in the same repo (git worktrees included) share a room, named after the repo, with its branch, its own office scene and a roster. |
+| **Desk titles** | Each desk shows what that agent is working on. Rename it by hand, or clear it to go back to automatic. |
 | **Plain-words activity** | Bubbles say *Running tests*, *Editing auth.ts*, *Committing*. The exact command is one hover away. |
-| **Needs you** | A session waiting for a permission or an answer raises its hand. You get a notification with **Jump**, a chime, a status-bar badge and a "Needs you" queue (oldest first). `Ctrl+Cmd+N` goes to the next one. |
-| **Agent console** | Click an agent to open it. You see what it's doing now, your task, its plan with progress, the files it changed and recent failures, then the conversation. Tool calls are folded into "N actions" strips with failures flagged; open them for input and output. |
+| **Subagents** | Subagents are kids on a play mat under their agent's desk: up to 10 shown, the rest as **+N**. |
+| **Needs you** | A session waiting for a permission or an answer raises its hand; a finished one keeps a hand up until its next prompt. You get a notification with **Jump**, a chime, a status-bar badge and a "Needs you" queue (oldest first). `Ctrl+Cmd+N` goes to the next one. |
+| **Agent console** | Click an agent to open it. You see what it's doing now, your task, its plan with progress, the files it changed and recent failures, then the conversation. Tool calls are folded into "N actions" strips with failures flagged; open them for input and output, or switch to *Everything* to open them all. **End** stops the session and takes it off the floor. |
 | **Talk to agents** | Type in the console; it becomes that session's next prompt. |
-| **New agents** | **＋** in a room asks for a name and a task, then opens a Claude Code tab or terminal in that repo. The new session takes the name and starts the task. |
+| **New agents** | **＋** in a room asks for a name and a task, then opens a Claude Code tab or terminal in that repo without taking you away from where you were. The new session takes the name and starts the task. The top-level **＋** can also start a new room in any folder. |
+| **Full screen** | Each office has a full-screen button that appears while the pointer moves; `Esc` exits. |
 | **Standup** | Per room or for everyone: each agent reports Done / Next / Blocked from its own conversation, and they take turns presenting in the scene. |
 | **Collision radar** | Warns when two live agents edited the same file, with a red line between their desks. |
 | **Insights** | Per-agent git changes (`+212 −40 · 6 files`) and token use (new vs. cached). |
@@ -91,14 +94,12 @@ Commands inside a session: `/office` · `/office standup` · `/office name <name
 ```sh
 ./scripts/check.sh                      # the gate: everything below
 claude plugin validate pixel-office     # the mod's manifest and hooks
-claude plugin test pixel-office         # 94 mod tests (state machine, rooms, inbox, alerts, standup, pane)
+claude plugin test pixel-office         # 98 mod tests (state machine, rooms, inbox, alerts, standup, scene, pane)
 cd extension && npm test                # 37 extension unit tests (transcript, git, setup, store over a real folder)
 node --test test/smoke.test.cjs         # the built extension against a fake vscode
 node test/webview-harness.mjs test/out  # the webview in headless Chrome, screenshots included
 node scripts/terminal-preview.mjs previews   # terminal renders from the real cell output
 ```
-
-`PLAN.md` holds the design: data formats, phases and the reasoning behind them.
 
 ## More screenshots
 
