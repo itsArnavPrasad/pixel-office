@@ -18,6 +18,11 @@ export class OfficeViews implements vscode.WebviewViewProvider {
     view.onDidDispose(() => (this.sidebar = null))
   }
 
+  /** True while the big office panel is the focused editor tab. */
+  get isPanelActive(): boolean {
+    return !!this.panel?.active
+  }
+
   openPanel() {
     if (this.panel) return this.panel.reveal()
     this.panel = vscode.window.createWebviewPanel('pixelOffice.office', 'Pixel Office', vscode.ViewColumn.Active, {

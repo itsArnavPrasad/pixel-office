@@ -164,12 +164,19 @@ export function activate(context: vscode.ExtensionContext) {
     const character = LOOK_IDS[Math.floor(Math.random() * LOOK_IDS.length)]!
     await store.spawn(target, name.trim(), task.trim(), character)
     if (how === 'Claude Code tab') {
-      await vscode.commands.executeCommand('claude-vscode.editor.open').then(undefined, () =>
-        vscode.window.showErrorMessage('Could not open a Claude Code tab: is the Claude Code extension installed?'),
-      )
+      // Claude Code always focuses its new tab: open it, then hand focus back to where you were.
+      // `programmatic` (its 6th argument) keeps it from also focusing its input once it loads.
+      const fromOffice = views.isPanelActive
+      const editor = vscode.window.activeTextEditor
+      const opened = await vscode.commands.executeCommand('claude-vscode.editor.open', undefined, undefined, undefined, undefined, undefined, { programmatic: true }).then(() => true, () => {
+        void vscode.window.showErrorMessage('Could not open a Claude Code tab: is the Claude Code extension installed?')
+        return false
+      })
+      if (opened && fromOffice) views.openPanel()
+      else if (opened && editor) await vscode.window.showTextDocument(editor.document, { viewColumn: editor.viewColumn, selection: editor.selection })
     } else {
       const term = vscode.window.createTerminal({ name: `claude · ${name.trim()}`, cwd: cwd! })
-      term.show()
+      term.show(true) // visible, but focus stays where you are
       term.sendText('claude')
     }
     void vscode.window.showInformationMessage(`${name.trim()} is on the way to ${basename(target)}. It takes its desk when its session starts.`)
