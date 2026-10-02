@@ -78,11 +78,11 @@ const A = (id, name, character, state, bubble, over = {}) => ({
   ...newAgent(id, T0), name, character, state, bubble, joinedAt: T0 + id.charCodeAt(0), since: NOW - 4000, heartbeat: NOW,
   isBusy: state !== 'idle', turns: 6, tools: 40, cwd: `/Users/dev/code/${name}`, ...over,
 })
-const me = A('a-me', 'first', 'dev-1', 'typing', '$ npm test -- login.spec.ts', { turns: 9, tools: 63 })
+const me = A('a-me', 'first', 'dev-1', 'typing', 'Running tests', { turns: 9, tools: 63 })
 const crowd = [
   A('b-web', 'web-app', 'dev-2', 'needs-you', 'Allow Bash: rm -rf dist?', { since: NOW - 134_000 }),
-  A('c-api', 'api', 'dev-3', 'reading', 'auth.controller.ts', { interns: 2 }),
-  A('d-infra', 'infra', 'dev-4', 'writing', '✎ main.tf'),
+  A('c-api', 'api', 'dev-3', 'reading', 'Reading auth.controller.ts', { interns: 2 }),
+  A('d-infra', 'infra', 'dev-4', 'writing', 'Editing main.tf'),
   A('e-docs', 'docs', 'dev-5', 'idle', '', { since: NOW - 300_000 }),
   A('f-ml', 'ml-train', 'dev-6', 'done', 'Loss is down to 0.12.'),
 ]
