@@ -130,13 +130,13 @@ describe('presence', () => {
     expect(w.mine()).toMatchObject({ state: 'needs-you', bubble: 'Allow Bash: rm -rf build?' })
   })
 
-  test('turn.complete shows the first sentence, then idles', async ($, on) => {
+  test('turn.complete shows the first sentence and stays done', async ($, on) => {
     const w = world(on)
     await boot($)
     await $.turn.complete({ answer: 'Fixed the auth bug. More words.', reason: 'answer', durationMs: 5, isAborted: false, turnId: 't1' } as never)
     expect(w.mine()).toMatchObject({ state: 'done', bubble: 'Fixed the auth bug.' })
-    await w.clock.advance(4000)
-    expect(w.mine().state).toBe('idle')
+    await w.clock.advance(60_000)
+    expect(w.mine().state).toBe('done')
   })
 
   test('others are polled in; a crowd shows in the status line', async ($, on) => {

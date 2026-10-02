@@ -81,8 +81,10 @@ export function drawOffice(
       const blinks = (now + (hash(s.id) % 3000)) % 3000 < 160
       blit(f, withHair(blinks ? PERSON.blink : PERSON.sit, look), cx, cy, pal, dim)
       if (face) acc(f, face, cx, cy, pal, dim)
-      if (s.state === 'needs-you') acc(f, 'handUp', cx, cy, pal, dim)
-      if (s.state === 'done') acc(f, 'armsUpL', cx, cy, pal, dim), acc(f, 'armsUpR', cx, cy, pal, dim)
+      // done: both arms up for a moment, then one hand stays raised until the next prompt
+      const cheering = s.state === 'done' && now - s.since < HOLD_MS
+      if (s.state === 'needs-you' || (s.state === 'done' && !cheering)) acc(f, 'handUp', cx, cy, pal, dim)
+      if (cheering) acc(f, 'armsUpL', cx, cy, pal, dim), acc(f, 'armsUpR', cx, cy, pal, dim)
       if (s.state === 'needs-you' && tick === 0) acc(f, 'alert', cx, cy, pal, dim)
       if (s.state === 'stressed') acc(f, 'sweat', cx, cy + (Math.floor(now / 200) % 3), pal, dim)
       if (s.state === 'thinking') for (let i = 0; i <= Math.floor(now / 300) % 3; i++) plot(f, cx + 2 + i * 2, at.y + 4, 0xffffff)

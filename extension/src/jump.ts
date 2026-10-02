@@ -26,3 +26,10 @@ export function processTree(): Promise<Map<number, number>> {
     execFile('ps', ['-A', '-o', 'pid=,ppid='], { timeout: 3000, maxBuffer: 4 << 20 }, (err, out) => resolve(err ? new Map() : parsePs(out))),
   )
 }
+
+/** The executable a pid runs ('' when it is gone). */
+export function commandOf(pid: number): Promise<string> {
+  return new Promise(resolve =>
+    execFile('ps', ['-p', String(pid), '-o', 'comm='], { timeout: 3000 }, (err, out) => resolve(err ? '' : out.trim())),
+  )
+}

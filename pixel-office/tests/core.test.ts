@@ -157,10 +157,10 @@ describe('agent reducer', () => {
     const a = agent({ state: 'idle' })
     expect(reduce(a, { kind: 'tool-done', isError: false }, T)).toBe(a)
   })
-  test('turn-done → done with the first sentence, then idle', () => {
+  test('turn-done → done with the first sentence, and it stays done', () => {
     const a = reduce(agent({ isBusy: true }), { kind: 'turn-done', text: 'Fixed the auth bug. Details…' }, T)
     expect(a).toMatchObject({ state: 'done', bubble: 'Fixed the auth bug.', lastLine: 'Fixed the auth bug.', isBusy: false })
-    expect(reduce(a, { kind: 'tick' }, T + HOLD_MS)).toMatchObject({ state: 'idle', bubble: '' })
+    expect(reduce(a, { kind: 'tick' }, T + 60 * HOLD_MS)).toMatchObject({ state: 'done', bubble: 'Fixed the auth bug.' })
   })
   test('interns never go negative; end → leaving', () => {
     const a = reduce(agent(), { kind: 'interns', delta: -1 }, T)

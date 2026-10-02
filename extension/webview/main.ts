@@ -249,10 +249,12 @@ function renderConsole(byId: Map<string, Seat>) {
     <div class="c-title"><span class="ic">${ICON[s.state] ?? '●'}</span> <b>${esc(s.name)}</b>
       <span class="pill st-${s.state}">${esc(STATE_LABEL[s.state] ?? s.state)}${s.isAway ? ' · away' : ''}</span><span class="grow"></span>
       <button class="c-jump" title="Focus this session's terminal">Jump</button>
+      <button class="c-end" title="Stop this Claude session and take it off the floor">End</button>
       <button class="c-file" title="Open the raw transcript (.jsonl)" ${ins.hasTranscript ? '' : 'disabled'}>Transcript</button>
       <button class="c-close" title="Close">✕</button></div>
     <div class="c-meta dim">${esc([room ? `📁 ${room.name}` : '', room?.branch ? `⎇ ${room.branch}` : '', ins.changes, ins.tokens].filter(Boolean).join(' · '))}</div>`
   $<HTMLButtonElement>('.c-jump', box).onclick = () => post({ type: 'jump', id: s.id })
+  $<HTMLButtonElement>('.c-end', box).onclick = () => post({ type: 'end', id: s.id })
   $<HTMLButtonElement>('.c-file', box).onclick = () => post({ type: 'openTranscript', id: s.id })
   $<HTMLButtonElement>('.c-close', box).onclick = () => post({ type: 'select', id: null })
   for (const b of box.querySelectorAll<HTMLButtonElement>('.seg button')) b.classList.toggle('on', b.dataset.f === saved.filter)

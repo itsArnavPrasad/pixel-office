@@ -15,7 +15,7 @@ export type Signal =
   | { kind: 'end' }
   | { kind: 'tick' }
 
-export const HOLD_MS = 3000 // done / stressed / arriving show this long
+export const HOLD_MS = 3000 // stressed / arriving show this long; done stays until the next prompt
 export const AWAY_MS = 20000 // no heartbeat this long → away
 export const PRUNE_MS = 10 * 60 * 1000 // no heartbeat this long → gone
 
@@ -79,7 +79,7 @@ export function reduce(a: AgentRecord, s: Signal, now: number): AgentRecord {
       return to('leaving', 'Bye!', { isBusy: false, interns: 0 })
     case 'tick': {
       const held = now - a.since >= HOLD_MS
-      if (held && (a.state === 'done' || a.state === 'arriving')) return { ...to('idle', ''), heartbeat: now }
+      if (held && a.state === 'arriving') return { ...to('idle', ''), heartbeat: now }
       if (held && a.state === 'stressed') return { ...to(a.isBusy ? 'thinking' : 'idle', a.isBusy ? a.bubble : ''), heartbeat: now }
       return { ...a, heartbeat: now }
     }

@@ -31,6 +31,7 @@ export type FromWebview =
   | { type: 'select'; id: string | null }
   | { type: 'send'; id: string; text: string }
   | { type: 'jump'; id: string }
+  | { type: 'end'; id: string }
   | { type: 'openTranscript'; id: string }
   | { type: 'retitle'; id: string }
   | { type: 'openPanel'; id: string | null }
@@ -56,6 +57,7 @@ export function parseFromWebview(m: unknown): FromWebview | null {
     case 'openPanel':
       return r.id === null || isId(r.id) ? { type: r.type, id: r.id as string | null } : null
     case 'jump':
+    case 'end':
     case 'openTranscript':
     case 'retitle':
       return isId(r.id) ? { type: r.type, id: r.id } : null

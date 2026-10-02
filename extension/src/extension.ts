@@ -11,7 +11,7 @@ import { branchIn, roomFor } from './git'
 import type { AlertMemory } from '../../pixel-office/types'
 import { collisions } from './collisions'
 import { Insights } from './insights'
-import { processTree, shellAncestor } from './jump'
+import { commandOf, processTree, shellAncestor } from './jump'
 import { uiLeader } from './peers'
 import type { FromWebview, Insight, RoomView, ViewState } from './protocol'
 import { addPluginDir, isEnabled, removePluginDir } from './setup'
@@ -206,25 +206,44 @@ export function activate(context: vscode.ExtensionContext) {
     publish(true)
   }
 
+  /** The integrated terminal in this window that a Claude process runs under, if any. */
+  async function terminalOf(pid: number): Promise<vscode.Terminal | null> {
+    if (!pid) return null
+    const terminals = new Map<number, vscode.Terminal>()
+    for (const t of vscode.window.terminals) {
+      const p = await t.processId
+      if (p) terminals.set(p, t)
+    }
+    const shell = shellAncestor(pid, new Set(terminals.keys()), await processTree())
+    return shell ? terminals.get(shell)! : null
+  }
+
   /** Focuses the integrated terminal the session runs in; otherwise says where it is. */
   async function jump(id: string) {
     const s = snap.seats.find(x => x.id === id)
     if (!s) return
-    if (s.pid) {
-      const terminals = new Map<number, vscode.Terminal>()
-      for (const t of vscode.window.terminals) {
-        const pid = await t.processId
-        if (pid) terminals.set(pid, t)
-      }
-      const shell = shellAncestor(s.pid, new Set(terminals.keys()), await processTree())
-      if (shell) {
-        terminals.get(shell)!.show()
-        return
-      }
-    }
+    const t = await terminalOf(s.pid)
+    if (t) return t.show()
     const here = vscode.workspace.workspaceFolders?.some(f => s.cwd === f.uri.fsPath || s.cwd.startsWith(f.uri.fsPath + '/'))
     const where = here ? 'a Claude Code tab in this window' : `the window or terminal for ${basename(s.cwd) || 'its folder'}`
     void vscode.window.showInformationMessage(`${s.name} isn't in one of this window's terminals. Look for it in ${where}.`)
+  }
+
+  /** Ends a session from the office: closes its terminal here, else stops its Claude process; either way it leaves the floor. */
+  async function endSession(id: string) {
+    const s = snap.seats.find(x => x.id === id)
+    if (!s) return
+    const pick = await vscode.window.showWarningMessage(`End ${s.name}? Its Claude session stops and it leaves the office.`, { modal: true }, 'End session')
+    if (pick !== 'End session') return
+    const t = await terminalOf(s.pid)
+    if (t) t.dispose()
+    // only signal a pid that is still a Claude process, so a reused pid is never hit
+    else if (s.pid && /claude|node/i.test(await commandOf(s.pid))) {
+      try { process.kill(s.pid, 'SIGTERM') } catch { /* already gone */ }
+    }
+    await store.forget(id)
+    if (selected === id) selected = null
+    return tick()
   }
 
   async function onMessage(m: FromWebview) {
@@ -248,6 +267,8 @@ export function activate(context: vscode.ExtensionContext) {
       }
       case 'jump':
         return jump(m.id)
+      case 'end':
+        return endSession(m.id)
       case 'retitle':
         return retitle(m.id)
       case 'standup':

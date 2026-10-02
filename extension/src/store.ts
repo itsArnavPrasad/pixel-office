@@ -114,6 +114,11 @@ export class OfficeStore {
     return ticket
   }
 
+  /** Takes a session off the floor now, instead of waiting for its heartbeat to go stale. */
+  async forget(id: string): Promise<void> {
+    if (ID.test(id)) await rm(join(this.root, 'agents', `${id}.json`), { force: true })
+  }
+
   /** Sets a session's desk title by hand; '' removes it, so the automatic one shows again. */
   async retitle(id: string, title: string): Promise<void> {
     if (!ID.test(id)) return
