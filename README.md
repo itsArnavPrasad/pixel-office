@@ -4,6 +4,10 @@ Run several Claude Code agents at once and see them all in one place: every sess
 character at a desk, grouped into one office room per repository. You can see who is working on what,
 who is waiting for you and who just finished, and you can talk to any of them with a click.
 
+<video src="previews/demo.mp4" poster="previews/editor-panel-rooms.png" controls muted playsinline width="100%"></video>
+
+▶ **[Watch the 22-second demo](previews/demo.mp4)**
+
 ![Rooms in the editor](previews/editor-panel-rooms.png)
 
 ## What it does
