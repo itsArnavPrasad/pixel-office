@@ -19,7 +19,7 @@ after(async () => {
 })
 
 const put = (id: string, over = {}) =>
-  writeFile(join(root, 'agents', `${id}.json`), JSON.stringify({ ...newAgent(id, NOW), name: id, heartbeat: NOW, ...over }))
+  writeFile(join(root, 'agents', `${id}.json`), JSON.stringify({ ...newAgent(id, NOW), name: id, cwd: '/r/web', heartbeat: NOW, ...over }))
 
 describe('OfficeStore over a real folder', () => {
   test('an empty or missing folder is an empty office', async () => {

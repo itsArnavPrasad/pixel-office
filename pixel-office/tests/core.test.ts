@@ -9,6 +9,7 @@ import { bubble, clean, firstSentence, redact, truncate, wrap } from '../hooks/c
 
 const T = 1_759_400_000_000
 const agent = (over: Partial<AgentRecord> = {}): AgentRecord => ({ ...newAgent('a1', T), ...over })
+const agent0 = agent
 
 describe('text', () => {
   test('clean strips ANSI, control chars and collapses space', () => {
@@ -190,8 +191,10 @@ describe('roster', () => {
     expect(parseRecord(JSON.stringify({ ...good, name: 'x'.repeat(101) }))).toBe(null)
   })
   test('mergeRoster prunes, marks away, dedupes and prefers me', () => {
+    const agent = (over: Partial<AgentRecord> = {}) => agent0({ cwd: '/r/web', ...over })
     const me = agent({ id: 'me', joinedAt: T })
     const seats = mergeRoster([
+      agent({ id: 'unstarted', cwd: '' }),
       agent({ id: 'b', joinedAt: T + 2, heartbeat: T }),
       agent({ id: 'b', joinedAt: T + 2, heartbeat: T - 5 }),
       agent({ id: 'old', heartbeat: T - PRUNE_MS - 10 }),

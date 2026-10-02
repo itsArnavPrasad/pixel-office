@@ -45,6 +45,7 @@ export function mergeRoster(records: (AgentRecord | null)[], me: AgentRecord | n
   if (me) byId.set(me.id, { ...me, heartbeat: now })
   const seats: Seat[] = []
   for (const r of byId.values()) {
+    if (!r.cwd) continue // never reached 'start' (a session that died while starting): no folder, no room
     const p = presence(r, now)
     if (p) seats.push({ ...r, isAway: p === 'away', isMe: r.id === me?.id })
   }

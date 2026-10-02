@@ -89,7 +89,7 @@ function world(on: On, opts: { store?: Record<string, unknown> } = {}) {
   on('classic.PermissionRequest', () => ({}) as never)
   on('classic.Notification', () => ({}) as never)
   const mine = (): AgentRecord => JSON.parse(files.get(MY_FILE) ?? 'null')
-  const put = (rec: AgentRecord) => files.set(`${ROOT}/agents/${rec.id}.json`, JSON.stringify(rec))
+  const put = (rec: AgentRecord) => files.set(`${ROOT}/agents/${rec.id}.json`, JSON.stringify({ ...rec, cwd: rec.cwd || '/work/web' }))
   return { files, prompts, opened, toasts, notified, forks, fork, history, completions, sound, statuses, clock, mine, put, knobs, store }
 }
 
