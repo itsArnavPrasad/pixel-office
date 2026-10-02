@@ -1,6 +1,13 @@
 // A frame as the terminal's Raster cells, or as an SVG document.
 import type { Frame } from './pixels'
 
+// The environment has the TC39 base64 method; es2023's lib does not type it yet.
+declare global {
+  interface Uint8Array {
+    toBase64(): string
+  }
+}
+
 const UPPER_HALF = 0x2580
 
 /**

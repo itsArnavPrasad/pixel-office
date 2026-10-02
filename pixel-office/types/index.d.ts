@@ -49,7 +49,6 @@ declare module 'claude-code' {
       me: AgentRecord | null
       roster: AgentRecord[]
       selected: string | null
-      draft: string
       logs: Record<string, LogLine[]>
     }
   }
