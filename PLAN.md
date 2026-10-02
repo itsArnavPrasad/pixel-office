@@ -345,3 +345,78 @@ Pure module `core/standup.ts`: `STANDUP_PROMPT`, `parseReport` (tolerates bullet
 - **integration:** another agent starts waiting → the leader chimes and notifies once, the non-leader only toasts; reminder;
   alerts off → silent; band shows and hides, and `n` opens the pane on the oldest; Standup press → request written →
   fork called once → answer written → card shows our row and another session's row; nothing-to-fork fallback.
+
+---
+
+## 8. Pixel Office for Cursor / VS Code: the extension (added 2026-10-03)
+
+### 8.1 Product
+A Cursor / VS Code extension that is the best screen for the office. The mod stays the
+part inside each session (it sees events, types prompts, answers standups); the extension
+reads and writes the same `~/.claude/pixel-office/` folder and adds what only an editor can:
+
+| Area | What the user gets |
+|---|---|
+| Office | Canvas webview at 60 fps (panel + sidebar mini view); characters walk smoothly; the scene follows the editor theme |
+| Interact | Click a character → dialogue (real recent conversation read from its transcript, reply box). Hover → card: task, files, changes, tokens |
+| Attention | Status bar `🏢 5 · ❗1`; native notification "web-app needs you" with **Jump** / **Open Office**; chime; `Ctrl+Alt+N` = next waiting |
+| Jump | A session running in an integrated terminal is focused by matching process ancestry; other sessions get an honest "open its Claude tab / window" hint |
+| Standup | Button + command; the same request/answer files as the mod; card + presenter spotlight |
+| Insight | Per-agent git changes (`+120 −30 · 4 files`), **collision radar** (two live agents edited the same file), per-agent token meter |
+| Setup | "Enable in all Claude sessions": copies the bundled mod to `~/.claude/pixel-office/mod` and adds it to `CLAUDE_CODE_PLUGIN_DIRS` in `~/.claude/settings.json`, after a confirmation, preserving everything else |
+
+### 8.2 Mod changes it needs (schema stays v1, new fields optional)
+- `pid`: the Claude process id (`sh -c 'echo $PPID'` at start), used for terminal jumping.
+- `files`: the last 8 absolute paths this session edited (Edit/Write/MultiEdit/NotebookEdit), used for collisions.
+- **UI deference:** while any `ui/<instance>.json` heartbeat is under 10 s old, mods skip the chime + OS
+  notification (toasts stay), so you don't get two notifications at once.
+- `parseRecord` fills missing optional fields, so old files still parse.
+
+### 8.3 Extension layout
+```
+extension/
+  package.json        contributes commands, views, settings, keybinding; main dist/extension.js
+  build.mjs           esbuild: src/extension.ts → dist/extension.js (cjs, node), webview/main.ts → dist/webview.js (iife)
+  src/
+    extension.ts      activate(): wires everything; the only file that imports 'vscode' besides ui/*
+    paths.ts          office folder paths
+    store.ts          watches + polls the folder → Snapshot {seats, standup, uiPeers}; pure parse in model.ts
+    model.ts          PURE: snapshot → view model (queue, spotlight, collisions, status text)
+    collisions.ts     PURE: overlapping recent files between live agents
+    transcript.ts     PURE parse + incremental tail of ~/.claude/projects/*/<id>.jsonl → recent lines + token totals
+    git.ts            `git diff --shortstat` + porcelain count per cwd (PURE parsers)
+    jump.ts           PURE ancestry match + vscode terminal lookup
+    setup.ts          PURE settings.json merge/unmerge + mod copy
+    alerts.ts         reuse core alertsDue; UI-leader election among extension windows (PURE)
+    ui/panel.ts       webview panel + sidebar view provider, message protocol
+  webview/
+    main.ts           canvas renderer (core drawOffice → ImageData, crisp scale), text with canvas fonts,
+                      hit testing, hover card, dialogue, queue + standup cards, chips
+    style.css
+  test/               node:test unit tests for every PURE module + a store test over a real temp folder
+```
+Core reuse: `pixel-office/hooks/core/*` imported directly by both bundles.
+
+### 8.4 Message protocol (webview ⇄ extension)
+`→ webview`: `{ type: 'snapshot', seats, queue, standup, spotlight, collisions, insights, selected, now }`
+`← webview`: `{ type: 'select', id }`, `{ type: 'send', id, text }`, `{ type: 'standup' }`, `{ type: 'jump', id }`, `{ type: 'ready' }`
+Every incoming message is validated (type, string lengths) before it is acted on.
+
+### 8.5 Phases and gates
+| # | Phase | Gate |
+|---|---|---|
+| E0 | Spikes: esbuild bundles core; canvas renders `drawOffice`; PPID from the mod; Cursor CLI installs a VSIX | each spike proven |
+| E1 | Mod changes (pid, files, UI deference) + tests | `scripts/check.sh` green |
+| E2 | Extension pure modules + node:test suites | all unit tests green, tsc clean |
+| E3 | Store over the real folder, status bar, notifications, commands | store test over a temp dir; tsc |
+| E4 | Webview office: canvas, click, hover, dialogue, cards | webview bundle builds; render-math tests |
+| E5 | Insights: git, collisions, transcript tokens + real dialogue lines | parser tests on real-shaped fixtures |
+| E6 | Setup command (enable/disable in all sessions) | merge/unmerge tests incl. malformed settings (never overwrite) |
+| E7 | Package `.vsix`, install into Cursor via its CLI, smoke check that it activates | `vsce package` ok; installed list shows it |
+
+`scripts/check.sh` runs both halves: mod validate + tsc + mod tests, then extension tsc + unit tests + bundle.
+
+### 8.6 Risks
+- Cursor-panel sessions cannot be focused by id (the Claude extension has no such command) → a hint instead of a jump.
+- Each Cursor window runs its own extension host → UI-leader election so only one window notifies.
+- Transcript format is internal → the parser is defensive, and a line it can't read is skipped.
