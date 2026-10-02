@@ -12,9 +12,9 @@ const UPPER_HALF = 0x2580
 
 /**
  * Raster cells take one printable width-1 BMP code point; anything wider or
- * invisible (emoji, CJK, combining marks, zero-width) becomes '?'.
+ * invisible (emoji, CJK, combining marks, zero-width) is dropped from text.
  */
-export function cellChar(cp: number): number {
+export function isCellChar(cp: number): boolean {
   const ok =
     (cp >= 0x20 && cp < 0x7f) ||
     (cp >= 0xa0 && cp < 0x300) ||
@@ -23,7 +23,7 @@ export function cellChar(cp: number): number {
     (cp >= 0x2030 && cp < 0x2060) ||
     (cp >= 0x2190 && cp < 0x2300) ||
     (cp >= 0x2500 && cp < 0x2600)
-  return ok ? cp : 0x3f
+  return ok
 }
 
 /** columns = w, rows = h / 2: each cell is ▀ with the top pixel as fg, bottom as bg. */
@@ -39,10 +39,11 @@ export function toRasterWords(f: Frame): Uint32Array {
     }
   for (const t of f.texts) {
     let c = t.col
-    for (const ch of t.text) {
+    // a dropped glyph (an emoji icon) takes no cell; the run closes up
+    for (const ch of [...t.text.replace(/\uFE0F/g, '')].filter(ch => isCellChar(ch.codePointAt(0)!))) {
       if (c >= f.w) break
       const i = (t.row * f.w + c) * 3
-      out[i] = cellChar(ch.codePointAt(0)!)
+      out[i] = ch.codePointAt(0)!
       out[i + 1] = t.fg
       out[i + 2] = t.bg
       c++

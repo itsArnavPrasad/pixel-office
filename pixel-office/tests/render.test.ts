@@ -2,7 +2,7 @@ import { describe, expect, test } from 'claude-code/testing'
 
 import type { AgentState } from '../types'
 import { newAgent } from '../hooks/core/agent'
-import { cellChar, toRasterWords, toSvg } from '../hooks/core/encode'
+import { isCellChar, toRasterWords, toSvg } from '../hooks/core/encode'
 import { blit, frame, rect, text } from '../hooks/core/pixels'
 import { assignDesks, type Seat } from '../hooks/core/roster'
 import { CELL_H, CELL_W, MAX_ROWS, drawOffice, hitTest, layout } from '../hooks/core/scene'
@@ -61,9 +61,15 @@ describe('encoders', () => {
     text(f, 1, 1, 'A', 9, 10)
     expect([...toRasterWords(f)]).toEqual([0x2580, 1, 3, 0x2580, 2, 4, 0x2580, 5, 7, 65, 9, 10])
   })
-  test('cellChar keeps width-1 text and replaces emoji / wide / invisible', () => {
-    for (const ch of 'aZ0 ~é…→█') expect(cellChar(ch.codePointAt(0)!)).toBe(ch.codePointAt(0))
-    for (const ch of ['🙂', '漢', '​', '́', 'ᄀ']) expect(cellChar(ch.codePointAt(0)!)).toBe(0x3f)
+  test('isCellChar keeps width-1 text and rejects emoji / wide / invisible', () => {
+    for (const ch of 'aZ0 ~é…→█') expect(isCellChar(ch.codePointAt(0)!)).toBe(true)
+    for (const ch of ['🙂', '漢', '\u200b', '\u0301', '\u1100', '✎', '❗']) expect(isCellChar(ch.codePointAt(0)!)).toBe(false)
+  })
+  test('raster text drops icons it cannot draw and closes up', () => {
+    const f = frame(6, 2, 0)
+    text(f, 0, 0, '✎ ab🔍c', 1, 2)
+    const words = [...toRasterWords(f)]
+    expect([0, 1, 2, 3, 4].map(c => String.fromCodePoint(words[c * 3]!))).toEqual([' ', 'a', 'b', 'c', '▀'])
   })
   test('raster cells length is columns × rows × 12 bytes', () => {
     const L = layout(80, 5)
