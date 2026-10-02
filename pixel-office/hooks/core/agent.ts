@@ -10,7 +10,7 @@ export type Signal =
   | { kind: 'tool-done'; isError: boolean }
   | { kind: 'needs-you'; text: string }
   | { kind: 'turn-done'; text: string; reason?: 'answer' | 'aborted' | 'refusal' | 'error' }
-  | { kind: 'interns'; delta: number }
+  | { kind: 'interns'; count: number }
   | { kind: 'title'; text: string }
   | { kind: 'end' }
   | { kind: 'tick' }
@@ -74,7 +74,7 @@ export function reduce(a: AgentRecord, s: Signal, now: number): AgentRecord {
       return to('done', bubble(line || 'Done!'), { isBusy: false, lastLine: line || a.lastLine })
     }
     case 'interns':
-      return { ...a, interns: Math.max(0, a.interns + s.delta), heartbeat: now }
+      return s.count === a.interns ? a : { ...a, interns: Math.max(0, s.count), heartbeat: now }
     case 'end':
       return to('leaving', 'Bye!', { isBusy: false, interns: 0 })
     case 'tick': {

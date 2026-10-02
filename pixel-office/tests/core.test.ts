@@ -163,9 +163,9 @@ describe('agent reducer', () => {
     expect(reduce(a, { kind: 'tick' }, T + 60 * HOLD_MS)).toMatchObject({ state: 'done', bubble: 'Fixed the auth bug.' })
   })
   test('interns never go negative; end → leaving', () => {
-    const a = reduce(agent(), { kind: 'interns', delta: -1 }, T)
+    const a = reduce(agent(), { kind: 'interns', count: -1 }, T)
     expect(a.interns).toBe(0)
-    expect(reduce(reduce(a, { kind: 'interns', delta: 2 }, T), { kind: 'end' }, T)).toMatchObject({ state: 'leaving', interns: 0 })
+    expect(reduce(reduce(a, { kind: 'interns', count: 2 }, T), { kind: 'end' }, T)).toMatchObject({ state: 'leaving', interns: 0 })
   })
   test('since only moves when the state or bubble changes', () => {
     const a = agent({ state: 'typing', bubble: 'Looking through the code', since: T })

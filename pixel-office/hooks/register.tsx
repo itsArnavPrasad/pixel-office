@@ -391,7 +391,12 @@ async function start($: $, cwd: string) {
   rt.isSoundOn = (await $.store.get('sound')) !== 'off'
   await identify($, cwd, null)
   await $.command.register({ name: 'office', description: 'Open the Pixel Office: every Claude session as a character you can talk to' })
-  $.clock.every(HEARTBEAT_MS, () => signal($, { kind: 'tick' }))
+  $.clock.every(HEARTBEAT_MS, async () => {
+    await signal($, { kind: 'tick' })
+    // subagents running now, read each beat: start/stop hooks miss background and stopped ones
+    const running = await $.agent.list().then(l => l.filter(a => a.status === 'running' && a.type !== 'teammate').length, () => null)
+    if (running !== null) await signal($, { kind: 'interns', count: running })
+  })
   $.clock.every(POLL_MS, () => poll($))
 }
 
@@ -566,16 +571,6 @@ export const register: Register = on => {
 
   on('classic.Notification', async ($, e, next) => {
     if (/permission|elicitation/i.test(e.notification_type)) await signal($, { kind: 'needs-you', text: e.message }).catch(() => {})
-    return next(e)
-  })
-
-  on('classic.SubagentStart', async ($, e, next) => {
-    await signal($, { kind: 'interns', delta: 1 }).catch(() => {})
-    return next(e)
-  })
-
-  on('classic.SubagentStop', async ($, e, next) => {
-    await signal($, { kind: 'interns', delta: -1 }).catch(() => {})
     return next(e)
   })
 
