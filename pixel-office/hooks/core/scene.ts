@@ -14,23 +14,27 @@ export const CELL_H = 22
 export const WALL_H = 12
 export const MAX_ROWS = 64 // effectively uncapped: every agent gets a desk
 export const IDLE_ZZZ_MS = 60_000
+export const PLAY_H = 18 // the play mat under each desk row, only while someone has subagents
+export const MAX_KIDS = 10 // subagents drawn per agent; the rest are "+N"
+const KIDS_PER_ROW = 5
 const BUBBLE_W = CELL_W - 2
 const DESK_TEXT_W = 16
 
 /** A standup presenter: stands up and says `text` (yellow when blocked, else green). */
 export type Spotlight = { id: string; text: string; isBlocked: boolean }
 
-export type Layout = { w: number; h: number; cols: number; rows: number; desks: { x: number; y: number }[] }
+export type Layout = { w: number; h: number; cols: number; rows: number; cellH: number; desks: { x: number; y: number }[] }
 
-/** One pixel per column; desk rows grow with the head count. */
-export function layout(columns: number, count: number): Layout {
+/** One pixel per column; desk rows grow with the head count, and gain a play mat when `play`. */
+export function layout(columns: number, count: number, play = false): Layout {
+  const cellH = CELL_H + (play ? PLAY_H : 0)
   const w = Math.max(CELL_W + 2, Math.min(Math.floor(columns), 512))
   const cols = Math.max(1, Math.floor((w - 2) / CELL_W))
   const rows = Math.max(1, Math.min(MAX_ROWS, Math.ceil(count / cols)))
   const ox = Math.floor((w - cols * CELL_W) / 2)
   const desks: Layout['desks'] = []
-  for (let r = 0; r < rows; r++) for (let c = 0; c < cols; c++) desks.push({ x: ox + c * CELL_W, y: WALL_H + r * CELL_H })
-  return { w, h: WALL_H + rows * CELL_H + 2, cols, rows, desks }
+  for (let r = 0; r < rows; r++) for (let c = 0; c < cols; c++) desks.push({ x: ox + c * CELL_W, y: WALL_H + r * cellH })
+  return { w, h: WALL_H + rows * cellH + 2, cols, rows, cellH, desks }
 }
 
 export const DOOR_AT = { x: 3, y: WALL_H - DOOR.length }
@@ -111,7 +115,7 @@ export function drawOffice(
       if (s.state === 'writing') acc(f, 'paper', cx, cy, pal, dim), acc(f, tick ? 'pencil1' : 'pencil2', cx, cy, pal, dim)
     }
 
-    for (let i = 0; i < Math.min(3, s.interns); i++) blit(f, INTERN, at.x + 3 + i * 5, at.y + 16 - ((tick + i) % 2), pal, dim)
+    if (s.interns > 0 && L.cellH > CELL_H) drawPlayArea(f, at, s.interns, tick, pal, dim)
 
     if (walking) {
       walkers.push(() => {
@@ -147,6 +151,22 @@ export function styles(seats: Seat[]): Map<string, number> {
     out.set(s.id, k)
   }
   return out
+}
+
+/** Subagents as kids on a mat under their agent's desk: two rows of five, then "+N". */
+function drawPlayArea(f: Frame, at: { x: number; y: number }, n: number, tick: number, pal: Record<string, number>, dim: number) {
+  const y = at.y + CELL_H
+  rect(f, at.x + 1, y, CELL_W - 2, PLAY_H - 1, shade(0x6fa8c9, dim))
+  rect(f, at.x + 2, y + 1, CELL_W - 4, PLAY_H - 3, shade(0x8cc4de, dim))
+  for (let i = 0; i < Math.min(MAX_KIDS, n); i++) {
+    const col = i % KIDS_PER_ROW
+    const row = Math.floor(i / KIDS_PER_ROW)
+    blit(f, INTERN, at.x + 1 + col * 4, y + 2 + row * 7 - ((tick + i) % 2), pal, dim)
+  }
+  if (n > MAX_KIDS) {
+    const more = `+${n - MAX_KIDS}`
+    text(f, at.x + Math.floor((CELL_W - more.length) / 2), (y + 16) / 2, more, 0x1a1a1a, shade(0x8cc4de, dim))
+  }
 }
 
 function acc(f: Frame, name: keyof typeof ACCESSORY, cx: number, cy: number, pal: Record<string, number>, dim: number) {
@@ -185,7 +205,7 @@ function drawRoom(f: Frame, L: Layout, t: Theme) {
 export function hitTest(L: Layout, desk: Map<string, number>, col: number, row: number): string | null {
   const x = col
   const y = row * 2
-  const d = L.desks.findIndex(at => x >= at.x && x < at.x + CELL_W && y >= at.y && y < at.y + CELL_H)
+  const d = L.desks.findIndex(at => x >= at.x && x < at.x + CELL_W && y >= at.y && y < at.y + L.cellH)
   if (d < 0) return null
   for (const [id, n] of desk) if (n === d) return id
   return null

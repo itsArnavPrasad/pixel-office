@@ -322,7 +322,7 @@ async function seatsNow($: $): Promise<{ seats: Seat[]; now: number }> {
 }
 
 function scene(seats: Seat[], columns: number, now: number, spot: Spotlight | null = null) {
-  const L = layout(columns, seats.length)
+  const L = layout(columns, seats.length, seats.some(s => s.interns > 0))
   const desk = assignDesks(seats.map(s => s.id), L.desks.length)
   return { L, f: drawOffice(L, seats, desk, now, undefined, spot) }
 }

@@ -5,7 +5,7 @@ import { newAgent } from '../hooks/core/agent'
 import { isCellChar, toRasterWords, toSvg } from '../hooks/core/encode'
 import { blit, frame, rect, text } from '../hooks/core/pixels'
 import { assignDesks, type Seat } from '../hooks/core/roster'
-import { CELL_H, CELL_W, MAX_ROWS, drawOffice, hitTest, layout, styles } from '../hooks/core/scene'
+import { CELL_H, CELL_W, MAX_ROWS, PLAY_H, drawOffice, hitTest, layout, styles } from '../hooks/core/scene'
 import * as art from '../hooks/core/sprites'
 
 const NOW = 1_759_400_100_000
@@ -124,6 +124,13 @@ describe('scene', () => {
     for (const t of f.texts) expect(t.col >= 0 && t.col + [...t.text].length <= L.w && t.row < L.h / 2).toBe(true)
     expect(f.texts.some(t => t.text.includes('• agent-0'))).toBe(true)
     expect(f.texts.some(t => t.text.includes('(away)'))).toBe(true)
+  })
+  test('subagents play on a mat under the desk: ten shown, the rest as +N', () => {
+    expect(layout(80, 3, true).h).toBe(layout(80, 3).h + PLAY_H)
+    const L = layout(80, 2, true)
+    const f = drawOffice(L, [seat(0, 'delegating', { interns: 13 }), seat(1, 'typing', { interns: 10 })], new Map([['s0', 0], ['s1', 1]]), NOW)
+    expect(f.texts.filter(t => t.text.startsWith('+')).map(t => t.text)).toEqual(['+3'])
+    expect(hitTest(L, new Map([['s0', 0]]), L.desks[0]!.x + 5, (L.desks[0]!.y + CELL_H + 4) / 2)).toBe('s0')
   })
   test('idle for over a minute snores; seats with no desk are skipped', () => {
     const L = layout(30, 1)
