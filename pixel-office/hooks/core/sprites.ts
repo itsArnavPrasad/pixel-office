@@ -62,6 +62,22 @@ export const PERSON = {
   ],
 } satisfies Record<string, Sprite>
 
+// Hairstyles: the person's top three rows, swapped in so no two desks look alike.
+export const HAIR: readonly Sprite[] = [
+  ['..hhhh..', '.hhhhhh.', '.hssssh.'], // short
+  ['.h.hh.h.', '.hhhhhh.', '.hssssh.'], // spiky
+  ['..hhhh..', '.hhhhhh.', 'hhsssshh'], // long
+  ['........', '..hhhh..', '.ssssss.'], // buzz
+  ['...hh...', '.hhhhhh.', '.hssssh.'], // bun
+  ['..hhhh..', '.hhhhhh.', '.hhhssh.'], // fringe
+  ['..cccc..', '.ccccccc', '.hssssh.'], // cap, in the shirt colour
+  ['...hh...', '..hhhh..', '.ssssss.'], // mohawk
+]
+export const FACE = [null, 'glasses', 'beard'] as const
+export const STYLES = HAIR.length * FACE.length
+
+export const withHair = (s: Sprite, style: number): Sprite => [...HAIR[style % HAIR.length]!, ...s.slice(3)]
+
 export const INTERN: Sprite = ['.hh.', 'hssh', '.ss.', 'cccc', 'cccc', '.pp.']
 
 // ── accessories, drawn relative to the person's top-left ─────────
@@ -79,10 +95,12 @@ export const ACCESSORY = {
   hands1: { at: [0, 9], art: ['s......s'] },
   hands2: { at: [0, 9], art: ['.s....s.'] },
   dot: { at: [0, 0], art: ['w'] },
+  glasses: { at: [1, 3], art: ['g.gg.g'] },
+  beard: { at: [1, 4], art: ['h....h', '.hhhh.'] },
 } satisfies Record<string, { at: readonly [number, number]; art: Sprite }>
 
 export const ACCESSORY_PALETTE: Palette = {
-  y: 0xffd23f, b: 0x5ab8ff, r: 0xd94848, w: 0xffffff,
+  y: 0xffd23f, b: 0x5ab8ff, r: 0xd94848, w: 0xffffff, g: 0x9aa0a6,
 }
 
 // ── furniture ────────────────────────────────────────────────────

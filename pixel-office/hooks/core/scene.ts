@@ -4,8 +4,8 @@ import { blit, frame, plot, rect, shade, text, type Frame } from './pixels'
 import type { Seat } from './roster'
 import { hash } from './roster'
 import {
-  ACCESSORY, ACCESSORY_PALETTE, COFFEE, DESK, DOOR, FURNITURE_PALETTE, INTERN, MONITOR, PERSON,
-  PLANT, SHELF, WINDOW, WINDOW_PALETTE, lookPalette,
+  ACCESSORY, ACCESSORY_PALETTE, COFFEE, DESK, DOOR, FACE, FURNITURE_PALETTE, HAIR, INTERN, MONITOR, PERSON,
+  PLANT, SHELF, STYLES, WINDOW, WINDOW_PALETTE, lookPalette, withHair,
 } from './sprites'
 import { truncate, wrap } from './text'
 
@@ -62,12 +62,15 @@ export function drawOffice(
   drawRoom(f, L, theme)
   const tick = Math.floor(now / 250) % 2
   const walkers: (() => void)[] = []
+  const style = styles(seats)
 
   for (const s of seats) {
     const d = desk.get(s.id) ?? -1
     const at = L.desks[d]
     if (!at) continue
     const pal = lookPalette(s.character, hash(s.id))
+    const look = style.get(s.id)!
+    const face = FACE[Math.floor(look / HAIR.length)]
     const dim = s.isAway ? 0.45 : 1
     const cx = at.x + 10
     const spot = spotlight?.id === s.id ? spotlight : null
@@ -76,7 +79,8 @@ export function drawOffice(
 
     if (!walking) {
       const blinks = (now + (hash(s.id) % 3000)) % 3000 < 160
-      blit(f, blinks ? PERSON.blink : PERSON.sit, cx, cy, pal, dim)
+      blit(f, withHair(blinks ? PERSON.blink : PERSON.sit, look), cx, cy, pal, dim)
+      if (face) acc(f, face, cx, cy, pal, dim)
       if (s.state === 'needs-you') acc(f, 'handUp', cx, cy, pal, dim)
       if (s.state === 'done') acc(f, 'armsUpL', cx, cy, pal, dim), acc(f, 'armsUpR', cx, cy, pal, dim)
       if (s.state === 'needs-you' && tick === 0) acc(f, 'alert', cx, cy, pal, dim)
@@ -113,7 +117,8 @@ export function drawOffice(
         const k = s.state === 'arriving' ? p : 1 - p
         const x = Math.round(DOOR_AT.x + (cx - DOOR_AT.x) * k)
         const y = Math.round(WALL_H - 4 + (cy - (WALL_H - 4)) * k)
-        blit(f, tick ? PERSON.walk1 : PERSON.walk2, x, y, pal, dim)
+        blit(f, withHair(tick ? PERSON.walk1 : PERSON.walk2, look), x, y, pal, dim)
+        if (face) acc(f, face, x, y, pal, dim)
       })
     }
 
@@ -126,9 +131,25 @@ export function drawOffice(
   return f
 }
 
+/**
+ * Hairstyle + face per id, unique within the room for each colour look: earliest
+ * arrivals pick first (hash(id) % STYLES, probing forward), so newcomers never restyle anyone.
+ */
+export function styles(seats: Seat[]): Map<string, number> {
+  const out = new Map<string, number>()
+  const taken = new Set<string>()
+  for (const s of [...seats].sort((a, b) => a.joinedAt - b.joinedAt || (a.id < b.id ? -1 : 1))) {
+    let k = hash(s.id) % STYLES
+    for (let i = 0; i < STYLES && taken.has(`${s.character}:${k}`); i++) k = (k + 1) % STYLES
+    taken.add(`${s.character}:${k}`)
+    out.set(s.id, k)
+  }
+  return out
+}
+
 function acc(f: Frame, name: keyof typeof ACCESSORY, cx: number, cy: number, pal: Record<string, number>, dim: number) {
   const a = ACCESSORY[name]
-  blit(f, a.art, cx + a.at[0], cy + a.at[1], { ...ACCESSORY_PALETTE, s: pal.s!, c: pal.c! }, dim)
+  blit(f, a.art, cx + a.at[0], cy + a.at[1], { ...ACCESSORY_PALETTE, s: pal.s!, c: pal.c!, h: pal.h! }, dim)
 }
 
 function drawBubble(f: Frame, s: Seat, at: { x: number; y: number }, now: number, theme: Theme, spot: Spotlight | null) {

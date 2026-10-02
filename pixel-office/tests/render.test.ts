@@ -5,7 +5,7 @@ import { newAgent } from '../hooks/core/agent'
 import { isCellChar, toRasterWords, toSvg } from '../hooks/core/encode'
 import { blit, frame, rect, text } from '../hooks/core/pixels'
 import { assignDesks, type Seat } from '../hooks/core/roster'
-import { CELL_H, CELL_W, MAX_ROWS, drawOffice, hitTest, layout } from '../hooks/core/scene'
+import { CELL_H, CELL_W, MAX_ROWS, drawOffice, hitTest, layout, styles } from '../hooks/core/scene'
 import * as art from '../hooks/core/sprites'
 
 const NOW = 1_759_400_100_000
@@ -19,8 +19,9 @@ describe('sprites', () => {
     const person = { ...art.lookPalette('dev-1', 0) }
     const problems = [
       ...Object.entries(art.PERSON).flatMap(([n, s]) => art.spriteProblems(`PERSON.${n}`, s, person)),
+      ...art.HAIR.flatMap((h, i) => art.spriteProblems(`HAIR.${i}`, art.withHair(art.PERSON.sit, i), person)),
       ...art.spriteProblems('INTERN', art.INTERN, person),
-      ...Object.entries(art.ACCESSORY).flatMap(([n, a]) => art.spriteProblems(n, a.art, { ...art.ACCESSORY_PALETTE, s: 1, c: 1 })),
+      ...Object.entries(art.ACCESSORY).flatMap(([n, a]) => art.spriteProblems(n, a.art, { ...art.ACCESSORY_PALETTE, s: 1, c: 1, h: 1 })),
       ...(['DESK', 'MONITOR', 'PLANT', 'COFFEE', 'SHELF', 'DOOR'] as const).flatMap(n => art.spriteProblems(n, art[n], art.FURNITURE_PALETTE)),
       ...art.spriteProblems('WINDOW', art.WINDOW, art.WINDOW_PALETTE(false)),
     ]
@@ -29,6 +30,12 @@ describe('sprites', () => {
   test('person frames are 8×12 and every look is complete', () => {
     for (const s of Object.values(art.PERSON)) expect([s.length, s[0]!.length]).toEqual([12, 8])
     for (const id of art.LOOK_IDS) expect(Object.keys(art.lookPalette(id, 0)).sort()).toEqual(['C', 'c', 'e', 'h', 'k', 'p', 's'])
+  })
+  test('same-colour agents in a room never share a style; earlier arrivals keep theirs', () => {
+    const seats = Array.from({ length: art.STYLES }, (_, i) => seat(i, 'idle', { character: 'dev-1', joinedAt: NOW + i }))
+    const all = styles(seats)
+    expect(new Set(all.values()).size).toBe(art.STYLES)
+    expect(styles(seats.slice(0, 3))).toEqual(new Map([...all].slice(0, 3)))
   })
   test('unknown character falls back to a look by index', () => {
     expect(art.lookPalette('nope', 1)).toEqual(art.lookPalette('dev-2', 0))
