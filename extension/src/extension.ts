@@ -218,13 +218,15 @@ export function activate(context: vscode.ExtensionContext) {
     return shell ? terminals.get(shell)! : null
   }
 
-  /** Focuses the integrated terminal the session runs in; otherwise says where it is. */
+  /** Focuses the session's terminal or Claude Code tab in this window; otherwise says where it is. */
   async function jump(id: string) {
     const s = snap.seats.find(x => x.id === id)
     if (!s) return
     const t = await terminalOf(s.pid)
     if (t) return t.show()
     const here = vscode.workspace.workspaceFolders?.some(f => s.cwd === f.uri.fsPath || s.cwd.startsWith(f.uri.fsPath + '/'))
+    // the agent id is its Claude session id: Claude Code reveals that session's tab or sidebar
+    if (here && await vscode.commands.executeCommand('claude-vscode.editor.open', s.id).then(() => true, () => false)) return
     const where = here ? 'a Claude Code tab in this window' : `the window or terminal for ${basename(s.cwd) || 'its folder'}`
     void vscode.window.showInformationMessage(`${s.name} isn't in one of this window's terminals. Look for it in ${where}.`)
   }
