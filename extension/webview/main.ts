@@ -197,7 +197,7 @@ function renderAttention(byId: Map<string, Seat>) {
 // ── the agent console ──────────────────────────────────────────────
 // What a developer running agents wants first: what it is working on, its plan and progress,
 // what it changed, what broke, and the conversation. Tool calls are folded into "N actions"
-// strips (failures flagged in red) and open on a click; "Everything" shows them all expanded.
+// strips (failures flagged in red), collapsed until clicked; "Everything" opens them all at once.
 let consoleKey = ''
 let openKeys = new Set<string>()
 
@@ -206,14 +206,21 @@ function buildConsole(box: HTMLElement) {
     <div class="c-head"></div>
     <div class="c-brief"></div>
     <div class="c-tools">
-      <div class="seg">${(['conversation', 'everything'] as const).map(f => `<button data-f="${f}" title="${f === 'conversation' ? 'Messages, with tool calls folded into summaries' : 'Every tool call, expanded'}">${f === 'conversation' ? 'Conversation' : 'Everything'}</button>`).join('')}</div>
+      <div class="seg">${(['conversation', 'everything'] as const).map(f => `<button data-f="${f}" title="${f === 'conversation' ? 'Messages, with tool calls folded into summaries' : 'Open every tool call'}">${f === 'conversation' ? 'Conversation' : 'Everything'}</button>`).join('')}</div>
       <span class="grow"></span><span class="c-count dim"></span>
     </div>
     <div class="c-log" tabindex="0"></div>
     <button class="c-latest" hidden>↓ Latest</button>
     <div class="composer"><textarea rows="2"></textarea>
       <div class="row"><button class="primary c-send">Send</button><span class="hint dim"></span></div></div>`
-  for (const b of box.querySelectorAll<HTMLButtonElement>('.seg button')) b.onclick = () => ((saved.filter = b.dataset.f as Saved['filter']), save(), (consoleKey = ''), render())
+  for (const b of box.querySelectorAll<HTMLButtonElement>('.seg button')) b.onclick = () => {
+    saved.filter = b.dataset.f as Saved['filter']
+    save()
+    // the switch opens or folds every strip once; each can still be toggled after
+    for (const d of box.querySelectorAll<HTMLDetailsElement>('details.actions')) d.open = saved.filter === 'everything'
+    consoleKey = ''
+    render()
+  }
   const log = $('.c-log', box)
   const latest = $<HTMLButtonElement>('.c-latest', box)
   log.onscroll = () => (latest.hidden = isAtBottom(log))
@@ -321,7 +328,7 @@ function messageHtml(e: Entry, name: string): string {
 
 function actionsHtml(b: Extract<Block, { kind: 'actions' }>): string {
   const k = `g${b.entries[0]!.index}`
-  const isOpen = saved.filter === 'everything' || openKeys.has(k)
+  const isOpen = openKeys.has(k)
   const flags = `${b.failed ? `<span class="flag err">✗ ${b.failed} failed</span>` : ''}${b.running ? `<span class="flag run">running…</span>` : ''}`
   // a hover over the strip lists what ran, without opening it
   const peek = b.entries.slice(-12).map(({ entry }) => `${entry.tool}: ${entry.text}`).join('\n')
@@ -384,7 +391,7 @@ function draw(st: Stage, roomId: string) {
   const fitted = fit(width0, isMini)
   // a small team gets a small office: no wider than its desks need, at the same scale
   const width = Math.min(fitted.width, Math.max(46, st.seats.length * 22 + 2))
-  const L = layout(width, st.seats.length)
+  const L = layout(width, st.seats.length, st.seats.some(s => s.interns > 0))
   // full screen: the same office, zoomed to the biggest whole scale that fits
   const box = st.canvas.parentElement!
   const scale = box.classList.contains('full') ? Math.max(1, Math.floor(Math.min(box.clientWidth / L.w, box.clientHeight / L.h))) : fitted.scale
