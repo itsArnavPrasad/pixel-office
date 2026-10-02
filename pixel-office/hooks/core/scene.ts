@@ -12,7 +12,7 @@ import { truncate, wrap } from './text'
 export const CELL_W = 22
 export const CELL_H = 22
 export const WALL_H = 12
-export const MAX_ROWS = 4
+export const MAX_ROWS = 64 // effectively uncapped: every agent gets a desk
 export const IDLE_ZZZ_MS = 60_000
 const BUBBLE_W = CELL_W - 2
 
@@ -21,7 +21,7 @@ export type Spotlight = { id: string; text: string; isBlocked: boolean }
 
 export type Layout = { w: number; h: number; cols: number; rows: number; desks: { x: number; y: number }[] }
 
-/** One pixel per column; desk rows grow with the head count, up to MAX_ROWS. */
+/** One pixel per column; desk rows grow with the head count. */
 export function layout(columns: number, count: number): Layout {
   const w = Math.max(CELL_W + 2, Math.min(Math.floor(columns), 512))
   const cols = Math.max(1, Math.floor((w - 2) / CELL_W))

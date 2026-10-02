@@ -22,6 +22,8 @@ export type AgentRecord = {
   character: string
   state: AgentState
   bubble: string
+  /** The raw detail behind the bubble (the exact command, the file path), for hover and the console. */
+  detail: string
   isBusy: boolean
   /** When this session arrived; stable, unlike `since`. */
   joinedAt: number
@@ -54,7 +56,7 @@ export type InboxMessage = {
 export type LogLine = { at: number; who: string; text: string }
 
 /** Waiting episodes already announced, by seat id (episode = the seat's `since`). */
-export type AlertMemory = Record<string, { since: number; isReminded: boolean }>
+export type AlertMemory = Record<string, { since: number; isReminded: boolean; seenAt?: number }>
 
 /** ~/.claude/pixel-office/standup/<id>.json */
 export type StandupRequest = { v: 1; id: string; by: string; requestedAt: number; room?: string }

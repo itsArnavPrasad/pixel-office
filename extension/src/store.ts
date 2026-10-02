@@ -3,7 +3,7 @@
 import { mkdir, readdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 
-import type { Standup, StandupAnswer } from '../../pixel-office/types'
+import type { SpawnTicket, Standup, StandupAnswer } from '../../pixel-office/types'
 import { makeMessage, messageId } from '../../pixel-office/hooks/core/inbox'
 import { mergeRoster, parseRecord, type Seat } from '../../pixel-office/hooks/core/roster'
 import { SHOW_MS, latestRequest, makeRequest, parseAnswer, parseRequest } from '../../pixel-office/hooks/core/standup'
@@ -12,6 +12,7 @@ import { parsePeer, type Peer } from './peers'
 export type Snapshot = { seats: Seat[]; standup: Standup | null; peers: Peer[] }
 
 const MAX_AGENTS = 64
+const PEER_STALE_MS = 60_000
 const ID = /^[A-Za-z0-9._-]{1,100}$/
 
 async function readText(path: string): Promise<string> {
@@ -74,9 +75,20 @@ export class OfficeStore {
   }
 
   /** Announces this window, which also tells the mods an editor is handling alerts. */
-  async heartbeat(now = Date.now()) {
-    const peer: Peer = { v: 1, id: this.id, startedAt: this.startedAt, heartbeat: now }
+  async heartbeat(now = Date.now(), flags: { isFocused: boolean; isNotifying: boolean } = { isFocused: true, isNotifying: true }) {
+    const peer: Peer = { v: 1, id: this.id, startedAt: this.startedAt, heartbeat: now, ...flags }
     await writeAtomic(join(this.root, 'ui', `${this.id}.json`), JSON.stringify(peer))
+    await this.sweepPeers(now)
+  }
+
+  /** Window files a crash or quit left behind (the async leave() rarely finishes on quit). */
+  private async sweepPeers(now: number) {
+    for (const name of await names(join(this.root, 'ui'))) {
+      if (name === `${this.id}.json`) continue
+      const path = join(this.root, 'ui', name)
+      const age = now - (await stat(path).then(s => s.mtimeMs, () => now))
+      if (age > PEER_STALE_MS) await rm(path, { force: true })
+    }
   }
 
   async send(to: string, text: string, now = Date.now()): Promise<boolean> {
@@ -87,10 +99,19 @@ export class OfficeStore {
     return true
   }
 
-  async requestStandup(by: string, now = Date.now()): Promise<string> {
+  /** A standup for one room (only its sessions answer), or for everyone with `room` null. */
+  async requestStandup(by: string, room: string | null = null, now = Date.now()): Promise<string> {
     const id = messageId(now, Math.random())
-    await writeAtomic(join(this.root, 'standup', `${id}.json`), JSON.stringify(makeRequest(id, by, now)))
+    const request = room ? { ...makeRequest(id, by, now), room } : makeRequest(id, by, now)
+    await writeAtomic(join(this.root, 'standup', `${id}.json`), JSON.stringify(request))
     return id
+  }
+
+  /** Asks the next Claude session that starts in `room` to take this name and task. */
+  async spawn(room: string, name: string, task: string, character: string, now = Date.now()): Promise<SpawnTicket> {
+    const ticket: SpawnTicket = { v: 1, id: messageId(now, Math.random()), room, name: name.slice(0, 40), task: task.slice(0, 4000), character, createdAt: now }
+    await writeAtomic(join(this.root, 'spawn', `${ticket.id}.json`), JSON.stringify(ticket))
+    return ticket
   }
 
   /** Removes this window's heartbeat when it closes. */

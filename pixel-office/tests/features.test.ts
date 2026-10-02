@@ -2,7 +2,7 @@ import { describe, expect, test } from 'claude-code/testing'
 
 import type { StandupAnswer } from '../types'
 import { newAgent } from '../hooks/core/agent'
-import { REMIND_MS, alertLeader, alertsDue, formatWait, notifyArgv, waitingQueue } from '../hooks/core/alerts'
+import { FORGET_MS, REMIND_MS, alertLeader, alertsDue, formatWait, notifyArgv, waitingQueue } from '../hooks/core/alerts'
 import { messageId } from '../hooks/core/inbox'
 import { TICKET_MS, groupRooms, parseTicket, remoteName, roomOf, ticketsFor, uniqueName } from '../hooks/core/rooms'
 import type { Seat } from '../hooks/core/roster'
@@ -47,6 +47,16 @@ describe('attention queue', () => {
     expect(r.memory).toEqual({})
     r = alertsDue([{ ...w, since: T + REMIND_MS * 7 }], r.memory, T + REMIND_MS * 7)
     expect(r.fresh.map(s => s.id)).toEqual(['w'])
+  })
+
+  test('alertsDue: a seat that misses a poll is not announced again', () => {
+    const w = seat('w', { state: 'needs-you', since: T })
+    let r = alertsDue([w], {}, T)
+    r = alertsDue([], r.memory, T + 1000) // its file failed to read once
+    r = alertsDue([w], r.memory, T + 2000)
+    expect(r.fresh.length).toBe(0)
+    r = alertsDue([], r.memory, T + 2000 + FORGET_MS)
+    expect(r.memory).toEqual({})
   })
 
   test('alertsDue: a new waiting episode (new since) fires again', () => {

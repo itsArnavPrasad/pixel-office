@@ -9,7 +9,7 @@ export type Signal =
   | { kind: 'tool'; tool: string; input?: Record<string, unknown> }
   | { kind: 'tool-done'; isError: boolean }
   | { kind: 'needs-you'; text: string }
-  | { kind: 'turn-done'; text: string }
+  | { kind: 'turn-done'; text: string; reason?: 'answer' | 'aborted' | 'refusal' | 'error' }
   | { kind: 'interns'; delta: number }
   | { kind: 'end' }
   | { kind: 'tick' }
@@ -34,7 +34,7 @@ export function isWorking(state: AgentState): boolean {
 
 export function newAgent(id: string, now: number): AgentRecord {
   return {
-    v: 1, id, name: 'claude', cwd: '', character: 'dev-1', state: 'arriving', bubble: 'Morning!',
+    v: 1, id, name: 'claude', cwd: '', character: 'dev-1', state: 'arriving', bubble: 'Morning!', detail: '',
     isBusy: false, joinedAt: now, since: now, heartbeat: now, turns: 0, tools: 0, interns: 0, lastLine: '', pid: 0, files: [], room: '', roomName: '',
   }
 }
@@ -54,15 +54,19 @@ export function reduce(a: AgentRecord, s: Signal, now: number): AgentRecord {
       const act = activityFor(s.tool, s.input)
       const path = EDITS.includes(s.tool) ? editedPath(s.input) : ''
       const files = path ? [path, ...(a.files ?? []).filter(f => f !== path)].slice(0, MAX_FILES) : a.files ?? []
-      return to(act.state, act.bubble, { isBusy: true, tools: a.tools + 1, files })
+      return to(act.state, act.bubble, { isBusy: true, tools: a.tools + 1, files, detail: act.detail })
     }
     case 'tool-done':
       if (s.isError) return to('stressed', 'Hmm, that failed…')
       // a tool ending answers a pending question or permission, so needs-you clears
       return a.state === 'needs-you' || isWorking(a.state) ? to('thinking', a.state === 'needs-you' ? 'Thanks!' : a.bubble) : a
     case 'needs-you':
-      return to('needs-you', bubble(s.text || 'I need you'))
+      // a permission prompt raises this twice (the request, then its notification): keep the first
+      // wording and the time the wait started
+      return a.state === 'needs-you' ? { ...a, heartbeat: now } : to('needs-you', bubble(s.text || 'I need you'))
     case 'turn-done': {
+      if (s.reason === 'aborted') return to('idle', 'Stopped.', { isBusy: false })
+      if (s.reason === 'error') return to('stressed', 'That turn failed.', { isBusy: false })
       const line = firstSentence(s.text)
       return to('done', bubble(line || 'Done!'), { isBusy: false, lastLine: line || a.lastLine })
     }

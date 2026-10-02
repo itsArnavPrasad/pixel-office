@@ -31,6 +31,11 @@
         "icon": "$(organization)"
       },
       {
+        "command": "pixelOffice.newAgent",
+        "title": "Pixel Office: New Agent…",
+        "icon": "$(add)"
+      },
+      {
         "command": "pixelOffice.nextWaiting",
         "title": "Pixel Office: Go to Next Agent Waiting for You"
       },
@@ -67,6 +72,11 @@
     },
     "menus": {
       "view/title": [
+        {
+          "command": "pixelOffice.newAgent",
+          "when": "view == pixelOffice.sidebar",
+          "group": "navigation"
+        },
         {
           "command": "pixelOffice.open",
           "when": "view == pixelOffice.sidebar",

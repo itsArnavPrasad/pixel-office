@@ -1,5 +1,5 @@
 // Several editor windows can each run the extension; one of them (the UI leader) notifies.
-export type Peer = { v: 1; id: string; startedAt: number; heartbeat: number }
+export type Peer = { v: 1; id: string; startedAt: number; heartbeat: number; isFocused?: boolean; isNotifying?: boolean }
 
 export const PEER_FRESH_MS = 10_000
 

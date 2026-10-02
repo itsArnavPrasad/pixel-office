@@ -21,8 +21,21 @@ export function describeChanges(c: Changes): string {
 
 function git(cwd: string, args: string[]): Promise<string> {
   return new Promise(resolve =>
-    execFile('git', ['-C', cwd, ...args], { timeout: 3000, maxBuffer: 1 << 20 }, (err, stdout) => resolve(err ? '' : stdout)),
+    // a repo's own config must not run anything: fsmonitor hooks are off, no index locks are taken
+    execFile('git', ['-c', 'core.fsmonitor=false', '--no-optional-locks', '-C', cwd, ...args], { timeout: 3000, maxBuffer: 1 << 20 }, (err, stdout) =>
+      resolve(err ? '' : stdout)),
   )
+}
+
+const branches = new Map<string, { at: number; value: string }>()
+
+/** The checked-out branch in `cwd` ('' outside a repository or when detached). Cached briefly. */
+export async function branchIn(cwd: string, now = Date.now()): Promise<string> {
+  const hit = branches.get(cwd)
+  if (hit && now - hit.at < CACHE_MS) return hit.value
+  const value = (await git(cwd, ['branch', '--show-current'])).trim().slice(0, 100)
+  branches.set(cwd, { at: now, value })
+  return value
 }
 
 const cache = new Map<string, { at: number; value: Changes | null }>()

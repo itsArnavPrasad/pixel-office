@@ -31,16 +31,23 @@ export function parseMessage(text: string): InboxMessage | null {
   }
 }
 
-/** Files named `<id>.json` newer than the cursor, oldest first. */
-export function pendingFiles(names: string[], cursor: string): string[] {
-  return [...new Set(names)]
-    .filter(n => n.endsWith('.json') && ID.test(n.slice(0, -5)) && n.slice(0, -5) > cursor)
-    .sort()
+/**
+ * Message files not yet delivered, oldest first. Delivery deletes the file, and the ids
+ * delivered so far are remembered too, so a file whose delete failed is never delivered twice
+ * and a message that arrives out of order is never skipped.
+ */
+export function pendingFiles(names: string[], delivered: readonly string[]): string[] {
+  const done = new Set(delivered)
+  return [...new Set(names)].filter(n => n.endsWith('.json') && ID.test(n.slice(0, -5)) && !done.has(n.slice(0, -5))).sort()
 }
+
+export const DELIVERED_KEEP = 200
 
 /** The prompt a delivered message becomes in the receiving session. */
 export function asPrompt(m: InboxMessage): string {
+  // always labelled: anything that can write the shared folder can drop a message, so the
+  // receiving session should know where the words came from
   return m.from === 'you'
-    ? m.text
+    ? `[Sent to you through Pixel Office]\n\n${m.text}`
     : `[Message from the Claude session "${m.fromName}" via Pixel Office]\n\n${m.text}`
 }

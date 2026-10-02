@@ -5,7 +5,7 @@ import type { AgentRecord, LogLine, Standup, StandupAnswer } from '../types'
 import { AWAY_MS, byUrgency, newAgent, PRUNE_MS, reduce, type Signal } from './core/agent'
 import { alertLeader, alertsDue, formatWait, notifyArgv, waitingQueue } from './core/alerts'
 import { toRasterCells, toSvg } from './core/encode'
-import { asPrompt, makeMessage, messageId, parseMessage, pendingFiles } from './core/inbox'
+import { DELIVERED_KEEP, asPrompt, makeMessage, messageId, parseMessage, pendingFiles } from './core/inbox'
 import { assignDesks, hash, mergeRoster, parseRecord, type Seat } from './core/roster'
 import { drawOffice, layout, type Spotlight } from './core/scene'
 import { LOOK_IDS } from './core/sprites'
@@ -52,6 +52,8 @@ const rt = {
   svgTicking: null as { cancel: () => void } | null,
   isDelivering: false,
   isAnswering: false,
+  claimedStandup: '',
+  cwd: '',
   isAlertsOn: true,
   isSoundOn: true,
   polls: 0,
@@ -123,7 +125,7 @@ async function poll($: $) {
   await alert($, seats, now)
   await deliver($)
   await pollStandup($, now)
-  if (++rt.polls % GC_EVERY === 0) await sweepStandups($, now)
+  if (++rt.polls % GC_EVERY === 0) await sweep($, now)
 }
 
 /** Messages addressed to this session, oldest first, each delivered once. */
@@ -134,11 +136,13 @@ async function deliver($: $) {
     const dir = inboxDir(rt.myId)
     const names = (await $.fs.list(dir).catch(() => [])).map(f => f.name)
     if (!names.length) return
-    const key = `cursor:${rt.myId}`
-    const cursor = String((await $.store.get(key)) ?? '')
-    for (const name of pendingFiles(names, cursor)) {
+    const key = `delivered:${rt.myId}`
+    const saved = await $.store.get(key)
+    const delivered = Array.isArray(saved) ? saved.filter((x): x is string => typeof x === 'string') : []
+    for (const name of pendingFiles(names, delivered)) {
       const m = parseMessage(await $.fs.read(`${dir}/${name}`).catch(() => ''))
-      await $.store.set(key, name.slice(0, -5))
+      delivered.push(name.slice(0, -5))
+      await $.store.set(key, delivered.slice(-DELIVERED_KEEP))
       void $.process.run(['rm', '-f', '--', `${dir}/${name}`]).catch(() => {})
       if (!m) {
         $.ui.log(`pixel-office: skipped a malformed message ${name}`)
@@ -171,10 +175,19 @@ async function alert($: $, seats: Seat[], now: number) {
   if (isLeader && rt.isSoundOn) void $.audio.play({ asset: CHIME }).catch(() => {})
 }
 
-/** Whether a Pixel Office editor window is open (it announces itself in ui/). */
+/**
+ * Whether a Pixel Office editor window has this covered: one that is focused and shows
+ * notifications. A background or minimised window would not be seen, so the mod still rings.
+ */
 async function isEditorWatching($: $, now: number): Promise<boolean> {
-  const peers = await $.fs.list(uiDir()).catch(() => [])
-  return peers.some(f => f.kind === 'file' && f.name.endsWith('.json') && now - f.mtimeMs < UI_FRESH_MS)
+  for (const f of await $.fs.list(uiDir()).catch(() => [])) {
+    if (f.kind !== 'file' || !f.name.endsWith('.json') || now - f.mtimeMs >= UI_FRESH_MS) continue
+    try {
+      const peer = JSON.parse(await $.fs.read(`${uiDir()}/${f.name}`)) as { isFocused?: unknown; isNotifying?: unknown }
+      if (peer.isFocused === true && peer.isNotifying === true) return true
+    } catch {}
+  }
+  return false
 }
 
 async function openOn($: $, id: string) {
@@ -213,8 +226,10 @@ async function pollStandup($: $, now: number) {
   const key = `standup:${rt.myId}`
   const room = (await read($, me))?.room
   if (request.room && request.room !== room) return // another room's standup
-  if (rt.isAnswering || now - request.requestedAt > ANSWER_WINDOW_MS || (await $.store.get(key)) === id) return
-  await $.store.set(key, id) // claimed before the fork, so a slow fork is never asked twice
+  if (rt.isAnswering || rt.claimedStandup === id || now - request.requestedAt > ANSWER_WINDOW_MS) return
+  rt.claimedStandup = id // claimed before any await, so two polls in flight never both fork
+  if ((await $.store.get(key)) === id) return
+  await $.store.set(key, id)
   rt.isAnswering = true
   void answerStandup($, id).finally(() => (rt.isAnswering = false))
 }
@@ -241,6 +256,27 @@ async function answerStandup($: $, requestId: string) {
     v: 1, id: rt.myId, name: self?.name ?? 'claude', character: self?.character ?? 'dev-1', ...report, at: await $.clock.now(),
   }
   await $.fs.write(`${standupDir()}/${requestId}/${rt.myId}.json`, JSON.stringify(answer))
+}
+
+/**
+ * Housekeeping, once a minute: old standups, the inboxes and store keys of sessions that are
+ * gone, and dialogue logs of agents no longer in the office. Only names that parse are touched.
+ */
+async function sweep($: $, now: number) {
+  await sweepStandups($, now)
+  const live = new Set([rt.myId, ...(await read($, roster)).map(r => r.id)])
+  const deadInboxes = (await $.fs.list(`${rt.root}/inbox`).catch(() => []))
+    .filter(f => f.kind === 'dir' && /^[A-Za-z0-9._-]{1,100}$/.test(f.name) && !live.has(f.name))
+    .map(f => `${rt.root}/inbox/${f.name}`)
+  if (deadInboxes.length) void $.process.run(['rm', '-rf', '--', ...deadInboxes]).catch(() => {})
+  for (const key of await $.store.keys().catch(() => [])) {
+    const m = /^(cursor|delivered|standup):(.+)$/.exec(key)
+    if (m && !live.has(m[2]!)) await $.store.delete(key).catch(() => {})
+  }
+  await update($, logs, all => {
+    const kept = Object.fromEntries(Object.entries(all).filter(([id]) => live.has(id)))
+    return Object.keys(kept).length === Object.keys(all).length ? all : kept
+  })
 }
 
 /** Removes standups older than KEEP_MS; only names that parse as request ids. */
@@ -324,30 +360,49 @@ async function setIdentity($: $, field: 'name' | 'character', value: string) {
   await save($)
 }
 
+/** After /clear: the old desk is cleared and this session sits down again under its new id. */
+async function rejoin($: $) {
+  const id = await $.session.id().catch(() => rt.myId)
+  if (!id || id === rt.myId) return
+  const old = rt.myId
+  void $.process.run(['rm', '-f', '--', `${agentsDir()}/${old}.json`]).catch(() => {})
+  const prev = await read($, me)
+  rt.myId = id
+  rt.lastWritten = ''
+  await update($, me, () => null)
+  await identify($, rt.cwd, prev ? { name: prev.name, character: prev.character } : null)
+}
+
 async function start($: $, cwd: string) {
   rt.root = `${(await $.env.get('HOME')) ?? '~'}/.claude/pixel-office`
   rt.myId = await $.session.id()
+  rt.cwd = cwd
   rt.isAlertsOn = (await $.store.get('alerts')) !== 'off'
   rt.isSoundOn = (await $.store.get('sound')) !== 'off'
+  await identify($, cwd, null)
+  await $.command.register({ name: 'office', description: 'Open the Pixel Office: every Claude session as a character you can talk to' })
+  $.clock.every(HEARTBEAT_MS, () => signal($, { kind: 'tick' }))
+  $.clock.every(POLL_MS, () => poll($))
+}
+
+/** Works out this session's room, name and look, and walks it in. */
+async function identify($: $, cwd: string, keep: { name: string; character: string } | null) {
   const { room, roomName } = roomOf(cwd, await $.session.repo().catch(() => null))
-  const ticket = await claimTicket($, room)
+  const ticket = keep ? null : await claimTicket($, room) // a rejoin after /clear is not a new agent
   // a name and look belong to this session: one set earlier (it survives a resume), a ticket's, or a fresh one
-  const savedName = await $.store.get(`name:session:${rt.myId}`)
-  const savedLook = await $.store.get(`look:session:${rt.myId}`)
+  const savedName = (await $.store.get(`name:session:${rt.myId}`)) ?? keep?.name
+  const savedLook = (await $.store.get(`look:session:${rt.myId}`)) ?? keep?.character
   const others = await roomNames($, room)
   const name = typeof savedName === 'string' ? savedName : uniqueName(ticket?.name || basename(cwd) || 'claude', others)
   const character = typeof savedLook === 'string' ? savedLook
     : ticket?.character && LOOK_IDS.includes(ticket.character) ? ticket.character
     : LOOK_IDS[hash(rt.myId) % LOOK_IDS.length]!
-  if (ticket) await $.store.set(`name:session:${rt.myId}`, name)
+  if (ticket || keep) await $.store.set(`name:session:${rt.myId}`, name)
   // $PPID of a child shell is this Claude process: what an editor matches its terminals against
   const ran = await $.process.run(['sh', '-c', 'echo $PPID']).catch(() => null)
   const pid = Number.parseInt(ran?.stdout.trim() ?? '', 10)
   await signal($, { kind: 'start', name: truncate(name, 40), cwd, character, pid: Number.isFinite(pid) ? pid : 0, room, roomName })
   if (ticket?.task) void $.prompt.submit({ text: ticket.task })
-  await $.command.register({ name: 'office', description: 'Open the Pixel Office: every Claude session as a character you can talk to' })
-  $.clock.every(HEARTBEAT_MS, () => signal($, { kind: 'tick' }))
-  $.clock.every(POLL_MS, () => poll($))
 }
 
 /** Names already used by live agents in this room, so a newcomer gets a distinct one. */
@@ -435,6 +490,12 @@ export const register: Register = on => {
   })
 
   on('session.end', async ($, e, next) => {
+    // /clear and an in-session resume keep this process under a new id, with no session.start:
+    // rejoin as that id instead of walking out
+    if (e.reason === 'clear' || e.reason === 'resume') {
+      $.clock.after(500, () => rejoin($))
+      return next(e)
+    }
     await signal($, { kind: 'end' }).catch(() => {})
     return next(e)
   })
@@ -510,7 +571,7 @@ export const register: Register = on => {
 
   on('turn.complete', async ($, e, next) => {
     if (!e.agentId) {
-      await signal($, { kind: 'turn-done', text: e.answer }).catch(() => {})
+      await signal($, { kind: 'turn-done', text: e.answer, reason: e.reason }).catch(() => {})
       if (e.answer) await log($, rt.myId, (await read($, me))?.name ?? 'claude', e.answer).catch(() => {})
     }
     return next(e)

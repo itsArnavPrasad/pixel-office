@@ -12,7 +12,8 @@ const ME = 'me-session'
 const MY_FILE = `${ROOT}/agents/${ME}.json`
 
 /** The world beneath the mod: files, prompts, toasts and status in memory. */
-function world(on: On) {
+function world(on: On, opts: { store?: Record<string, unknown> } = {}) {
+  const knobs = { id: ME, rmFails: false, runs: [] as string[][] }
   const files = new Map<string, string>()
   const prompts: string[] = []
   const opened: string[] = []
@@ -25,7 +26,12 @@ function world(on: On) {
   const completions: string[] = []
   const statuses: string[] = []
   const clock = mock.clock(on, { now: T })
-  mock.store(on)
+  // the plugin's store, in a Map the tests can read
+  const store = new Map<string, unknown>(Object.entries(opts.store ?? {}))
+  on('store.get', ($, e) => ({ value: store.get(e.key) }) as never)
+  on('store.set', ($, e) => (store.set(e.key, JSON.parse(JSON.stringify(e.value))), { value: undefined }) as never)
+  on('store.delete', ($, e) => (store.delete(e.key), { value: undefined }) as never)
+  on('store.keys', () => ({ value: [...store.keys()] }) as never)
   mock.env(on, { HOME })
   const dirOf = (p: string) => p.slice(0, p.lastIndexOf('/'))
   const ok = (value?: unknown) => ({ value }) as never
@@ -36,12 +42,19 @@ function world(on: On) {
     if (t === undefined) throw new Error(`ENOENT ${e.path}`)
     return ok(t)
   })
-  on('fs.list', ($, e) =>
-    ok([...files.entries()]
-      .filter(([p]) => dirOf(p) === e.path)
-      .map(([p, t]) => ({ name: p.slice(p.lastIndexOf('/') + 1), kind: 'file', size: t.length, mtimeMs: clock.now(), isLink: false }))),
-  )
+  on('fs.list', ($, e) => {
+    const out = new Map<string, { name: string; kind: string; size: number; mtimeMs: number; isLink: boolean }>()
+    for (const [p, t] of files) {
+      if (!p.startsWith(`${e.path}/`)) continue
+      const rest = p.slice(e.path.length + 1)
+      const name = rest.split('/')[0]!
+      out.set(name, { name, kind: rest.includes('/') ? 'dir' : 'file', size: t.length, mtimeMs: clock.now(), isLink: false })
+    }
+    return ok([...out.values()])
+  })
   on('process.run', ($, e) => {
+    knobs.runs.push([...e.argv])
+    if (e.argv[0] === 'rm' && knobs.rmFails) return ok({ exitCode: 1, stdout: '', stderr: 'denied' })
     if (e.argv[0] === 'rm') for (const p of e.argv.slice(3)) for (const k of [...files.keys()]) if (k === p || k.startsWith(`${p}/`)) files.delete(k)
     if (e.argv[0] === 'osascript') notified.push([...e.argv.slice(-2)])
     if (e.argv[0] === 'sh') return ok({ exitCode: 0, stdout: '31337\n', stderr: '' })
@@ -52,7 +65,7 @@ function world(on: On) {
     }
     return ok({ exitCode: 0, stdout: '', stderr: '' })
   })
-  on('session.id', () => ok(ME))
+  on('session.id', () => ok(knobs.id))
   on('session.repo', () => ok(null))
   on('session.messages', () => ok(history))
   on('session.model', () => ok('claude-opus-5-5'))
@@ -77,7 +90,7 @@ function world(on: On) {
   on('classic.Notification', () => ({}) as never)
   const mine = (): AgentRecord => JSON.parse(files.get(MY_FILE) ?? 'null')
   const put = (rec: AgentRecord) => files.set(`${ROOT}/agents/${rec.id}.json`, JSON.stringify(rec))
-  return { files, prompts, opened, toasts, notified, forks, fork, history, completions, sound, statuses, clock, mine, put }
+  return { files, prompts, opened, toasts, notified, forks, fork, history, completions, sound, statuses, clock, mine, put, knobs, store }
 }
 
 async function boot($: Engine, cwd = '/work/api-server') {
@@ -106,7 +119,7 @@ describe('presence', () => {
     await boot($)
     await $.prompt.submit({ text: 'run the tests' } as never)
     await $.tool.call({ tool: 'Bash', command: 'npm test' } as never)
-    expect(during!).toMatchObject({ state: 'typing', bubble: '$ npm test' })
+    expect(during!).toMatchObject({ state: 'typing', bubble: 'Running tests', detail: '$ npm test' })
     expect(w.mine()).toMatchObject({ state: 'thinking', tools: 1, turns: 1 })
   })
 
@@ -144,7 +157,7 @@ describe('inbox', () => {
     w.files.set(`${ROOT}/inbox/${ME}/${m.id}.json`, JSON.stringify(m))
     await w.clock.advance(1100)
     await w.clock.advance(1100)
-    expect(w.prompts.filter(p => p === 'also update the README').length).toBe(1)
+    expect(w.prompts.filter(p => p.endsWith('also update the README')).length).toBe(1)
     expect(w.files.has(`${ROOT}/inbox/${ME}/${m.id}.json`)).toBe(false)
   })
 
@@ -226,11 +239,20 @@ describe('attention queue', () => {
   test('an open editor window takes over the chime and notification', async ($, on) => {
     const w = world(on)
     await boot($)
-    w.files.set(`${ROOT}/ui/window-1.json`, '{"v":1}')
+    w.files.set(`${ROOT}/ui/window-1.json`, JSON.stringify({ v: 1, isFocused: true, isNotifying: true }))
     w.put({ ...newAgent('web', T + 50), name: 'web', state: 'needs-you', bubble: 'Which DB?' })
     await w.clock.advance(1100)
     expect([w.notified.length, w.sound.chimes]).toEqual([0, 0])
     expect(w.toasts.some(t => t.includes('web needs you'))).toBe(true)
+  })
+
+  test('a background editor window does not silence the OS notification', async ($, on) => {
+    const w = world(on)
+    await boot($)
+    w.files.set(`${ROOT}/ui/window-1.json`, JSON.stringify({ v: 1, isFocused: false, isNotifying: true }))
+    w.put({ ...newAgent('web', T + 50), name: 'web', state: 'needs-you', bubble: 'Which DB?' })
+    await w.clock.advance(1100)
+    expect(w.notified.length).toBe(1)
   })
 
   test('a session that is not the leader toasts but stays quiet', async ($, on) => {
@@ -371,5 +393,41 @@ describe('rooms and new agents', () => {
     expect(w.completions[0]).toContain('assistant: Rooms are in. [tools: Edit]')
     const answer = [...w.files.entries()].find(([k]) => k.endsWith(`/${ME}.json`) && k.includes('/standup/'))
     expect(JSON.parse(answer![1])).toMatchObject({ done: 'shipped the rooms', next: 'polish', blocked: '' })
+  })
+})
+
+describe('lifecycle and housekeeping', () => {
+  test('/clear rejoins under the new id instead of leaving', async ($, on) => {
+    const w = world(on)
+    await boot($)
+    await $.command.run({ command: 'office', args: 'name Ada' } as never)
+    w.knobs.id = 'after-clear'
+    await $.session.end({ reason: 'clear', sessionId: ME } as never)
+    await w.clock.advance(600)
+    const fresh = JSON.parse(w.files.get(`${ROOT}/agents/after-clear.json`) ?? 'null')
+    expect(fresh).toMatchObject({ id: 'after-clear', name: 'Ada' })
+    expect(w.files.has(MY_FILE)).toBe(false)
+  })
+
+  test('a message delivered once is never delivered again, even if its delete failed', async ($, on) => {
+    const w = world(on)
+    w.knobs.rmFails = true
+    await boot($)
+    const m = makeMessage('you', 'you', 'once only', T, 0.5)!
+    w.files.set(`${ROOT}/inbox/${ME}/${m.id}.json`, JSON.stringify(m))
+    await w.clock.advance(1100)
+    await w.clock.advance(1100)
+    await w.clock.advance(1100)
+    expect(w.prompts.filter(p => p.endsWith('once only')).length).toBe(1)
+  })
+
+  test('housekeeping removes dead sessions\' inboxes and store keys', async ($, on) => {
+    const w = world(on, { store: { 'delivered:ghost': ['x'], 'standup:ghost': 'y', [`delivered:${ME}`]: ['z'] } })
+    await boot($)
+    w.files.set(`${ROOT}/inbox/ghost/0001759400000000-abcdef.json`, '{}')
+    for (let i = 0; i < 61; i++) await w.clock.advance(1000)
+    expect(w.knobs.runs.some(r => r[0] === 'rm' && r.some(a => a.endsWith('/inbox/ghost')))).toBe(true)
+    expect([w.store.has('delivered:ghost'), w.store.has('standup:ghost')]).toEqual([false, false])
+    expect(w.store.get(`delivered:${ME}`)).toEqual(['z'])
   })
 })

@@ -3,6 +3,8 @@ import type { AlertMemory } from '../../types'
 import type { Seat } from './roster'
 
 export const REMIND_MS = 3 * 60 * 1000
+/** A waiting seat missing from one or two polls (a slow read) is not a new episode when it returns. */
+export const FORGET_MS = 15_000
 
 /** Seats blocked on you, longest wait first. */
 export function waitingQueue(seats: Seat[]): Seat[] {
@@ -33,12 +35,13 @@ export function alertsDue(queue: Seat[], memory: AlertMemory, now: number): Aler
     const seen = memory[s.id]
     if (!seen || seen.since !== s.since) {
       fresh.push(s)
-      next[s.id] = { since: s.since, isReminded: false }
+      next[s.id] = { since: s.since, isReminded: false, seenAt: now }
     } else if (!seen.isReminded && now - s.since >= REMIND_MS) {
       remind.push(s)
-      next[s.id] = { since: s.since, isReminded: true }
-    } else next[s.id] = seen
+      next[s.id] = { since: s.since, isReminded: true, seenAt: now }
+    } else next[s.id] = { ...seen, seenAt: now }
   }
+  for (const [id, seen] of Object.entries(memory)) if (!next[id] && now - (seen.seenAt ?? 0) < FORGET_MS) next[id] = seen
   return { fresh, remind, memory: next }
 }
 

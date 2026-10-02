@@ -4,7 +4,7 @@ import type { AgentRecord } from '../types'
 import { HOLD_MS, PRUNE_MS, byUrgency, newAgent, presence, reduce } from '../hooks/core/agent'
 import { asPrompt, makeMessage, messageId, parseMessage, pendingFiles } from '../hooks/core/inbox'
 import { assignDesks, hash, mergeRoster, parseRecord } from '../hooks/core/roster'
-import { activityFor } from '../hooks/core/signals'
+import { activityFor, describeCommand } from '../hooks/core/signals'
 import { bubble, clean, firstSentence, redact, truncate, wrap } from '../hooks/core/text'
 
 const T = 1_759_400_000_000
@@ -45,21 +45,45 @@ describe('text', () => {
 })
 
 describe('signals', () => {
-  test('each tool maps to its activity', () => {
-    expect(activityFor('Bash', { command: 'npm test' })).toEqual({ state: 'typing', bubble: '$ npm test' })
-    expect(activityFor('Read', { file_path: '/a/b/c.ts' })).toEqual({ state: 'reading', bubble: 'c.ts' })
-    expect(activityFor('Grep', { pattern: 'TODO' }).state).toBe('reading')
-    expect(activityFor('Edit', { file_path: 'src/x.ts' })).toEqual({ state: 'writing', bubble: '✎ x.ts' })
-    expect(activityFor('WebFetch', { url: 'https://example.com/a' }).bubble).toBe('🌐 example.com')
-    expect(activityFor('WebFetch', { url: 'not a url' }).bubble).toBe('🌐 not a url')
-    expect(activityFor('Agent', { description: 'scan repo' }).state).toBe('delegating')
-    expect(activityFor('AskUserQuestion', { questions: [{ question: 'Which DB?' }] })).toEqual({ state: 'needs-you', bubble: 'Which DB?' })
-    expect(activityFor('mcp__github__create_issue')).toEqual({ state: 'working', bubble: 'github: create_issue' })
-    expect(activityFor('SomethingNew')).toEqual({ state: 'working', bubble: 'SomethingNew' })
+  test('each tool reads as plain words; the raw detail is kept apart', () => {
+    expect(activityFor('Bash', { command: 'npm test' })).toEqual({ state: 'typing', bubble: 'Running tests', detail: '$ npm test' })
+    expect(activityFor('Read', { file_path: '/a/b/c.ts' })).toEqual({ state: 'reading', bubble: 'Reading c.ts', detail: '/a/b/c.ts' })
+    expect(activityFor('Grep', { pattern: 'TODO' }).bubble).toBe('Searching for TODO')
+    expect(activityFor('Edit', { file_path: '/r/src/x.ts' }).bubble).toBe('Editing x.ts')
+    expect(activityFor('Write', { file_path: '/r/new.ts' }).bubble).toBe('Writing new.ts')
+    expect(activityFor('WebFetch', { url: 'https://example.com/a' }).bubble).toBe('Reading example.com')
+    expect(activityFor('Agent', { description: 'scan repo' })).toMatchObject({ state: 'delegating', bubble: 'Delegating: scan repo' })
+    expect(activityFor('AskUserQuestion', { questions: [{ question: 'Which DB?' }] })).toMatchObject({ state: 'needs-you', bubble: 'Which DB?' })
+    expect(activityFor('mcp__github__create_issue').bubble).toBe('Using github: create issue')
+    expect(activityFor('SomethingNew').bubble).toBe('Using SomethingNew')
   })
-  test('bash bubbles redact secrets and ignore non-string input', () => {
-    expect(activityFor('Bash', { command: 'GITHUB_TOKEN=abc gh pr list' }).bubble).toBe('$ GITHUB_TOKEN=*** gh pr list')
-    expect(activityFor('Bash', { command: 42 }).bubble).toBe('$')
+  test('shell commands are named by what they are for', () => {
+    const cases: [string, string][] = [
+      ['cd "/x y" && npm test -- --runs=5 2>&1 | tail', 'Running tests'],
+      ['CI=1 pnpm run test', 'Running tests'],
+      ['pytest -q tests/', 'Running tests'],
+      ['npx tsc -p .', 'Checking types and lint'],
+      ['npm run build', 'Building'],
+      ['npm i -D esbuild', 'Installing packages'],
+      ['pnpm add -D vitest', 'Installing packages'],
+      ['git add -A && git commit -m x', 'Using git'],
+      ['git commit -m "fix"', 'Committing'],
+      ['git push origin main', 'Pushing'],
+      ['git status --short', 'Reviewing changes'],
+      ['gh pr create --fill', 'Working on a pull request'],
+      ['curl -s https://api.x', 'Calling a URL'],
+      ['ls -la src', 'Looking through the code'],
+      ['grep -rn TODO .', 'Looking through the code'],
+      ['mkdir -p a && cp x a', 'Moving files around'],
+      ['node scripts/preview.mjs', 'Running a script'],
+      ['frobnicate --all', 'Running a command'],
+      ['', 'Running a command'],
+    ]
+    for (const [cmd, want] of cases) expect([cmd, describeCommand(cmd)]).toEqual([cmd, want])
+  })
+  test('bash details redact secrets and ignore non-string input', () => {
+    expect(activityFor('Bash', { command: 'GITHUB_TOKEN=abc gh pr list' })).toMatchObject({ bubble: 'Working on a pull request', detail: '$ GITHUB_TOKEN=*** gh pr list' })
+    expect(activityFor('Bash', { command: 42 }).bubble).toBe('Running a command')
   })
 })
 
@@ -108,6 +132,15 @@ describe('agent reducer', () => {
     const a = reduce(agent({ files: ['/x'] }), { kind: 'start', name: 'n', cwd: '/c', character: 'dev-1', pid: 4242 }, T)
     expect([a.pid, a.files]).toEqual([4242, ['/x']])
   })
+  test('a second needs-you keeps the first wording and wait start', () => {
+    const a = reduce(agent({ isBusy: true }), { kind: 'needs-you', text: 'Allow Bash: rm -rf dist?' }, T)
+    const b = reduce(a, { kind: 'needs-you', text: 'Claude needs your permission to use Bash' }, T + 50)
+    expect([b.bubble, b.since, b.heartbeat]).toEqual(['Allow Bash: rm -rf dist?', T, T + 50])
+  })
+  test('an interrupted turn stops, a failed one is stressed, neither says Done', () => {
+    expect(reduce(agent({ isBusy: true }), { kind: 'turn-done', text: '', reason: 'aborted' }, T)).toMatchObject({ state: 'idle', bubble: 'Stopped.', isBusy: false })
+    expect(reduce(agent({ isBusy: true }), { kind: 'turn-done', text: '', reason: 'error' }, T)).toMatchObject({ state: 'stressed', isBusy: false })
+  })
   test('tool-done while idle changes nothing', () => {
     const a = agent({ state: 'idle' })
     expect(reduce(a, { kind: 'tool-done', isError: false }, T)).toBe(a)
@@ -123,7 +156,7 @@ describe('agent reducer', () => {
     expect(reduce(reduce(a, { kind: 'interns', delta: 2 }, T), { kind: 'end' }, T)).toMatchObject({ state: 'leaving', interns: 0 })
   })
   test('since only moves when the state or bubble changes', () => {
-    const a = agent({ state: 'typing', bubble: '$ ls', since: T })
+    const a = agent({ state: 'typing', bubble: 'Looking through the code', since: T })
     expect(reduce(a, { kind: 'tool', tool: 'Bash', input: { command: 'ls' } }, T + 500).since).toBe(T)
   })
   test('presence: here, away, pruned; leaving is pruned after the hold', () => {
@@ -205,15 +238,16 @@ describe('inbox', () => {
     expect(parseMessage(JSON.stringify({ ...m, text: 5 }))).toBe(null)
     expect(parseMessage('garbage')).toBe(null)
   })
-  test('pendingFiles: newer than cursor, sorted, deduped, only message files', () => {
+  test('pendingFiles: not yet delivered, sorted, deduped, only message files', () => {
     const a = `${messageId(T, 0.1)}.json`
     const b = `${messageId(T + 5, 0.1)}.json`
-    expect(pendingFiles([b, a, a, 'notes.txt', 'x.json'], '')).toEqual([a, b])
-    expect(pendingFiles([a, b], a.slice(0, -5))).toEqual([b])
-    expect(pendingFiles([a, b], b.slice(0, -5))).toEqual([])
+    expect(pendingFiles([b, a, a, 'notes.txt', 'x.json'], [])).toEqual([a, b])
+    expect(pendingFiles([a, b], [a.slice(0, -5)])).toEqual([b])
+    // an older id arriving after a newer one was delivered is still delivered (no cursor to fall behind)
+    expect(pendingFiles([a], [b.slice(0, -5)])).toEqual([a])
   })
   test('asPrompt: your words pass through, agent messages are labelled', () => {
-    expect(asPrompt(makeMessage('you', 'you', 'run tests', T, 0)!)).toBe('run tests')
+    expect(asPrompt(makeMessage('you', 'you', 'run tests', T, 0)!)).toBe('[Sent to you through Pixel Office]\n\nrun tests')
     expect(asPrompt(makeMessage('s2', 'web', 'hi', T, 0)!)).toContain('"web"')
   })
 })

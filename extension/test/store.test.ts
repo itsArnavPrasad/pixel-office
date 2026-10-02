@@ -50,7 +50,7 @@ describe('OfficeStore over a real folder', () => {
 
   test('a standup request shows with its answers in answer order', async () => {
     const store = new OfficeStore(root)
-    const id = await store.requestStandup('editor', NOW)
+    const id = await store.requestStandup('editor', null, NOW)
     await mkdir(join(root, 'standup', id), { recursive: true })
     const ans = (who: string, at: number) => ({ v: 1, id: who, name: who, character: 'dev-1', done: `${who} done`, next: '', blocked: '', at })
     await writeFile(join(root, 'standup', id, 'web.json'), JSON.stringify(ans('web', NOW + 2)))
@@ -62,11 +62,34 @@ describe('OfficeStore over a real folder', () => {
     assert.equal((await store.read(NOW + 11 * 60_000)).standup, null)
   })
 
+  test('a room standup carries its room; a spawn ticket parses for the mod', async () => {
+    const { parseTicket } = await import('../../pixel-office/hooks/core/rooms')
+    const store = new OfficeStore(root)
+    const id = await store.requestStandup('editor', '/r/web', NOW)
+    assert.equal(JSON.parse(await readFile(join(root, 'standup', `${id}.json`), 'utf8')).room, '/r/web')
+    const t = await store.spawn('/r/web', 'tests-bot', 'write tests', 'dev-3', NOW)
+    assert.deepEqual(parseTicket(await readFile(join(root, 'spawn', `${t.id}.json`), 'utf8')), t)
+  })
+
+  test('heartbeat sweeps window files a crash left behind', async () => {
+    const { utimes } = await import('node:fs/promises')
+    await mkdir(join(root, 'ui'), { recursive: true })
+    const stale = join(root, 'ui', 'w-dead.json')
+    await writeFile(stale, '{}')
+    const old = new Date(Date.now() - 5 * 60_000)
+    await utimes(stale, old, old)
+    await new OfficeStore(root, NOW, 'w-live').heartbeat(NOW, { isFocused: false, isNotifying: true })
+    const left = await readdir(join(root, 'ui'))
+    assert.ok(!left.includes('w-dead.json') && left.includes('w-live.json'))
+    assert.equal(JSON.parse(await readFile(join(root, 'ui', 'w-live.json'), 'utf8')).isFocused, false)
+    await rm(join(root, 'ui', 'w-live.json'))
+  })
+
   test('heartbeat announces the window; leave removes it', async () => {
     const store = new OfficeStore(root, NOW, 'w-test')
     await store.heartbeat(NOW + 5)
     let s = await store.read(NOW)
-    assert.deepEqual(s.peers, [{ v: 1, id: 'w-test', startedAt: NOW, heartbeat: NOW + 5 }])
+    assert.deepEqual(s.peers, [{ v: 1, id: 'w-test', startedAt: NOW, heartbeat: NOW + 5, isFocused: true, isNotifying: true }])
     await store.leave()
     s = await store.read(NOW)
     assert.deepEqual(s.peers, [])

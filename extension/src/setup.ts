@@ -24,15 +24,20 @@ function dirsOf(settings: Record<string, unknown>): { env: Record<string, unknow
   return { env: env as Record<string, unknown>, dirs: (cur ?? '').split(':').filter(Boolean) }
 }
 
-/** Adds `dir` to env.CLAUDE_CODE_PLUGIN_DIRS, keeping every other setting and directory. */
-export function addPluginDir(text: string, dir: string): Edit {
+/**
+ * Adds `dir` to env.CLAUDE_CODE_PLUGIN_DIRS, keeping every other setting and directory. A value
+ * the shell already sets (`shellDirs`) is carried in when settings has none, since the settings
+ * env would replace it.
+ */
+export function addPluginDir(text: string, dir: string, shellDirs?: string): Edit {
   const p = parse(text)
   if ('error' in p) return p
   const s = p.settings
   const d = dirsOf(s)
   if ('error' in d) return d
   if (d.dirs.includes(dir)) return { text, changed: false }
-  const env = { ...d.env, [KEY]: [...d.dirs, dir].join(':') }
+  const base = d.dirs.length ? d.dirs : (shellDirs ?? '').split(':').filter(x => x && x !== dir)
+  const env = { ...d.env, [KEY]: [...base, dir].join(':') }
   return { text: JSON.stringify({ ...s, env }, null, 2) + '\n', changed: true }
 }
 
