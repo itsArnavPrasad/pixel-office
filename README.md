@@ -27,6 +27,11 @@ who is waiting for you and who just finished, and you can talk to any of them wi
 | **Collision radar** | Warns when two live agents edited the same file, with a red line between their desks. |
 | **Insights** | Per-agent git changes (`+212 −40 · 6 files`) and token use (new vs. cached). |
 
+![One office in full screen](previews/editor-fullscreen.png)
+
+*One office in full screen: desk titles (**Auth fix**), `auth`'s two subagents on the play mat, the collision
+line between `auth` and `ui-polish`, and `deploy` with its hand up waiting for you.*
+
 ![The agent console](previews/editor-panel-console.png)
 
 ## Two parts, one office
@@ -101,6 +106,9 @@ node test/webview-harness.mjs test/out  # the webview in headless Chrome, screen
 node scripts/terminal-preview.mjs previews   # terminal renders from the real cell output
 ```
 
+The README screenshots come from those last two: `previews/editor-*.png` are copies of the harness's
+`test/out/panel-*.png`, `sidebar.png` and `fullscreen.png`. `previews/terminal-*.png` are written in place.
+
 ## More screenshots
 
 | | |
@@ -109,3 +117,5 @@ node scripts/terminal-preview.mjs previews   # terminal renders from the real ce
 | Standup for a room: Done / Next / Blocked | The activity-bar mini office |
 | ![Everything view](previews/editor-panel-everything.png) | ![Terminal standup](previews/terminal-3-standup.png) |
 | The console's *Everything* view, every tool call open | A standup in the terminal |
+| ![Terminal dialogue](previews/terminal-2-dialogue.png) | |
+| Talking to another agent from the terminal | |
