@@ -1,0 +1,6 @@
+{
+  "name": "pixel-office",
+  "version": "0.1.0",
+  "description": "Every Claude Code session as a pixel character in a shared office you can click and talk to",
+  "types": "./types/index.d.ts"
+}

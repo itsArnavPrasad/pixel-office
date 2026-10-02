@@ -1,0 +1,4 @@
+node_modules/
+pixel-office/.claude-plugin/types/
+pixel-office/tsconfig.json
+.DS_Store
