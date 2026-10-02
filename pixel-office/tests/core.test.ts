@@ -39,6 +39,8 @@ describe('text', () => {
     expect(wrap('one two three', 7)).toEqual(['one two', 'three'])
     expect(wrap('abcdefghij', 4)).toEqual(['abcd', 'efgh', 'ij'])
     expect(wrap('', 5)).toEqual([])
+    expect(wrap('$ abcdefgh', 6)).toEqual(['$ abcd', 'efgh'])
+    expect(wrap('abcde abcdefgh', 6)).toEqual(['abcde', 'abcdef', 'gh'])
   })
 })
 

@@ -49,10 +49,16 @@ export function wrap(text: string, width: number): string[] {
   let line = ''
   for (const word of text.split(' ').filter(Boolean)) {
     let w = word
+    // a word longer than a line fills what is left of this one, then hard-wraps
     while ([...w].length > width) {
-      if (line) lines.push(line), (line = '')
-      lines.push([...w].slice(0, width).join(''))
-      w = [...w].slice(width).join('')
+      const room = line ? width - [...line].length - 1 : width
+      if (room <= 0) {
+        lines.push(line), (line = '')
+        continue
+      }
+      lines.push(line ? `${line} ${[...w].slice(0, room).join('')}` : [...w].slice(0, room).join(''))
+      line = ''
+      w = [...w].slice(room).join('')
     }
     if (!line) line = w
     else if ([...line].length + 1 + [...w].length <= width) line += ' ' + w
