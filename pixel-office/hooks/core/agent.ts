@@ -1,10 +1,10 @@
 // One session's character: a pure reducer from session signals to its record.
 import type { AgentRecord, AgentState } from '../../types'
 import { activityFor } from './signals'
-import { bubble, firstSentence } from './text'
+import { basename, bubble, firstSentence } from './text'
 
 export type Signal =
-  | { kind: 'start'; name: string; cwd: string; character: string; pid?: number }
+  | { kind: 'start'; name: string; cwd: string; character: string; pid?: number; room?: string; roomName?: string }
   | { kind: 'prompt'; text: string }
   | { kind: 'tool'; tool: string; input?: Record<string, unknown> }
   | { kind: 'tool-done'; isError: boolean }
@@ -35,7 +35,7 @@ export function isWorking(state: AgentState): boolean {
 export function newAgent(id: string, now: number): AgentRecord {
   return {
     v: 1, id, name: 'claude', cwd: '', character: 'dev-1', state: 'arriving', bubble: 'Morning!',
-    isBusy: false, joinedAt: now, since: now, heartbeat: now, turns: 0, tools: 0, interns: 0, lastLine: '', pid: 0, files: [],
+    isBusy: false, joinedAt: now, since: now, heartbeat: now, turns: 0, tools: 0, interns: 0, lastLine: '', pid: 0, files: [], room: '', roomName: '',
   }
 }
 
@@ -46,7 +46,8 @@ export function reduce(a: AgentRecord, s: Signal, now: number): AgentRecord {
   switch (s.kind) {
     case 'start':
       // a restart or hot reload keeps the arrival time, so seniority is stable
-      return { ...newAgent(a.id, now), name: s.name, cwd: s.cwd, character: s.character, turns: a.turns, tools: a.tools, joinedAt: a.joinedAt || now, pid: s.pid ?? a.pid ?? 0, files: a.files ?? [] }
+      return { ...newAgent(a.id, now), name: s.name, cwd: s.cwd, character: s.character, turns: a.turns, tools: a.tools, joinedAt: a.joinedAt || now, pid: s.pid ?? a.pid ?? 0, files: a.files ?? [],
+        room: s.room || s.cwd, roomName: s.roomName || basename(s.cwd) }
     case 'prompt':
       return to('thinking', bubble(s.text), { isBusy: true, turns: a.turns + 1 })
     case 'tool': {

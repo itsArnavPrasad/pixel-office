@@ -81,6 +81,23 @@ export function presenter(answers: StandupAnswer[], startedAt: number, now: numb
   return order[turn]!.id
 }
 
+/**
+ * The conversation as plain text for a standup asked without a fork (a resumed
+ * session has nothing to fork until its next turn): the newest messages that fit.
+ */
+export function digest(messages: { role: string; text: string; toolUses?: { tool: string }[] }[], max = 8000): string {
+  const lines: string[] = []
+  let size = 0
+  for (const m of [...messages].reverse()) {
+    const tools = m.toolUses?.length ? ` [tools: ${[...new Set(m.toolUses.map(t => t.tool))].join(', ')}]` : ''
+    const line = `${m.role}: ${truncate(clean(m.text), 600)}${tools}`
+    if (size + line.length > max) break
+    lines.unshift(line)
+    size += line.length + 1
+  }
+  return lines.join('\n')
+}
+
 /** What a presenter's bubble says. */
 export function headline(a: StandupAnswer): string {
   if (a.blocked) return `Blocked: ${a.blocked}`

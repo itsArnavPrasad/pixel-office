@@ -21,6 +21,8 @@ function world(on: On) {
   const forks: string[] = []
   const sound = { chimes: 0 }
   const fork = { reply: 'Done: fixed login\nNext: add tests\nBlocked: nothing' as string | null }
+  const history: { role: string; text: string; toolUses: { tool: string }[] }[] = []
+  const completions: string[] = []
   const statuses: string[] = []
   const clock = mock.clock(on, { now: T })
   mock.store(on)
@@ -28,6 +30,7 @@ function world(on: On) {
   const dirOf = (p: string) => p.slice(0, p.lastIndexOf('/'))
   const ok = (value?: unknown) => ({ value }) as never
   on('fs.write', ($, e) => (files.set(e.path, e.text), ok()))
+  on('fs.exists', ($, e) => ok(files.has(e.path)))
   on('fs.read', ($, e) => {
     const t = files.get(e.path)
     if (t === undefined) throw new Error(`ENOENT ${e.path}`)
@@ -42,9 +45,18 @@ function world(on: On) {
     if (e.argv[0] === 'rm') for (const p of e.argv.slice(3)) for (const k of [...files.keys()]) if (k === p || k.startsWith(`${p}/`)) files.delete(k)
     if (e.argv[0] === 'osascript') notified.push([...e.argv.slice(-2)])
     if (e.argv[0] === 'sh') return ok({ exitCode: 0, stdout: '31337\n', stderr: '' })
+    if (e.argv[0] === 'mv') {
+      const [from, to] = e.argv.slice(-2) as [string, string]
+      if (!files.has(from)) return ok({ exitCode: 1, stdout: '', stderr: 'gone' })
+      files.set(to, files.get(from)!), files.delete(from)
+    }
     return ok({ exitCode: 0, stdout: '', stderr: '' })
   })
   on('session.id', () => ok(ME))
+  on('session.repo', () => ok(null))
+  on('session.messages', () => ok(history))
+  on('session.model', () => ok('claude-opus-5-5'))
+  on('model.complete', ($, e) => (completions.push(e.prompt), ok({ isAnswered: true, text: 'Done: shipped the rooms\nNext: polish\nBlocked: none', usage: {} })))
   on('prompt.submit', ($, e) => (prompts.push(e.text), { text: e.text }))
   on('ui.status', ($, e) => (statuses.push(JSON.stringify(e)), ok()))
   on('session.start', ($, e) => ({ cwd: e.cwd }))
@@ -65,7 +77,7 @@ function world(on: On) {
   on('classic.Notification', () => ({}) as never)
   const mine = (): AgentRecord => JSON.parse(files.get(MY_FILE) ?? 'null')
   const put = (rec: AgentRecord) => files.set(`${ROOT}/agents/${rec.id}.json`, JSON.stringify(rec))
-  return { files, prompts, opened, toasts, notified, forks, fork, sound, statuses, clock, mine, put }
+  return { files, prompts, opened, toasts, notified, forks, fork, history, completions, sound, statuses, clock, mine, put }
 }
 
 async function boot($: Engine, cwd = '/work/api-server') {
@@ -150,12 +162,15 @@ describe('pane', () => {
     test(`draws the office and name chips on ${surface}`, async ($, on) => {
       const w = world(on)
       await boot($)
-      w.put({ ...newAgent('other', T), name: 'web', state: 'typing', bubble: '$ ls' })
+      w.put({ ...newAgent('other', T), name: 'web', state: 'typing', bubble: '$ ls', cwd: '/work/api-server', room: '/work/api-server' })
+      w.put({ ...newAgent('far', T), name: 'docs', cwd: '/work/docs', room: '/work/docs' })
       await w.clock.advance(1100)
       const ui = await $.ui.mount({ plugin: 'pixel-office', surface, component: 'Pane', props: PANE_PROPS, requestId: 'pixel-office' })
       expect(await ui.find({ type: surface === 'terminal' ? 'Raster' : 'Svg' })).toBeDefined()
       expect(await ui.find({ key: 'chip-other' })).toBeDefined()
       expect(await ui.find({ key: `chip-${ME}`, text: /api-server \(here\)/ })).toBeDefined()
+      expect(await ui.find({ key: 'chip-far' })).toBeUndefined() // another room
+      expect(await ui.find({ type: 'Text', text: /api-server · 2 here · 1 in other rooms/ })).toBeDefined()
       await ui.press({ key: 'chip-other' })
       expect(await ui.find({ type: 'Text', text: /\$ ls/ })).toBeDefined()
       if (surface !== 'mobile') {
@@ -301,5 +316,60 @@ describe('standup', () => {
     const before = w.forks.length
     await w.clock.advance(1100)
     expect(w.forks.length).toBe(before)
+  })
+})
+
+describe('rooms and new agents', () => {
+  test('a spawn ticket for this room names the session and starts its task, once', async ($, on) => {
+    const w = world(on)
+    const id = messageId(T - 1000, 0.7)
+    const ticket = { v: 1, id, room: '/work/api-server', name: 'tests-bot', task: 'write tests for auth', character: 'dev-6', createdAt: T - 1000 }
+    w.files.set(`${ROOT}/spawn/${id}.json`, JSON.stringify(ticket))
+    await boot($)
+    expect(w.mine()).toMatchObject({ name: 'tests-bot', character: 'dev-6', room: '/work/api-server', roomName: 'api-server' })
+    await w.clock.settle()
+    expect(w.prompts).toContain('write tests for auth')
+    expect(w.files.has(`${ROOT}/spawn/${id}.json`)).toBe(false)
+    expect(w.files.has(`${ROOT}/spawn/${id}.json.claimed`)).toBe(true)
+  })
+
+  test('a ticket for another room, or a stale one, is left alone', async ($, on) => {
+    const w = world(on)
+    const a = messageId(T, 0.1)
+    const b = messageId(T - 4 * 60_000, 0.2)
+    w.files.set(`${ROOT}/spawn/${a}.json`, JSON.stringify({ v: 1, id: a, room: '/work/other', name: 'x', task: 't', character: 'dev-1', createdAt: T }))
+    w.files.set(`${ROOT}/spawn/${b}.json`, JSON.stringify({ v: 1, id: b, room: '/work/api-server', name: 'y', task: 't', character: 'dev-1', createdAt: T - 4 * 60_000 }))
+    await boot($)
+    expect(w.mine().name).toBe('api-server')
+    expect(w.prompts.length).toBe(0)
+  })
+
+  test('a second session in the same repo gets a distinct name', async ($, on) => {
+    const w = world(on)
+    w.put({ ...newAgent('twin', T), name: 'api-server', cwd: '/work/api-server', room: '/work/api-server' })
+    await boot($)
+    expect(w.mine().name).toBe('api-server 2')
+  })
+
+  test('a standup for another room is not answered', async ($, on) => {
+    const w = world(on)
+    await boot($)
+    const id = messageId(T, 0.9)
+    w.files.set(`${ROOT}/standup/${id}.json`, JSON.stringify({ v: 1, id, by: 'x', requestedAt: T, room: '/work/docs' }))
+    await w.clock.advance(1100)
+    expect(w.forks.length).toBe(0)
+  })
+
+  test('a resumed session answers a standup from its history', async ($, on) => {
+    const w = world(on)
+    w.fork.reply = null
+    w.history.push({ role: 'user', text: 'build rooms', toolUses: [] }, { role: 'assistant', text: 'Rooms are in.', toolUses: [{ tool: 'Edit' }] })
+    await boot($)
+    await $.command.run({ command: 'office', args: 'standup' } as never)
+    await w.clock.advance(1100)
+    expect(w.completions.length).toBe(1)
+    expect(w.completions[0]).toContain('assistant: Rooms are in. [tools: Edit]')
+    const answer = [...w.files.entries()].find(([k]) => k.endsWith(`/${ME}.json`) && k.includes('/standup/'))
+    expect(JSON.parse(answer![1])).toMatchObject({ done: 'shipped the rooms', next: 'polish', blocked: '' })
   })
 })

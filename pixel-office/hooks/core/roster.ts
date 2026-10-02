@@ -1,6 +1,7 @@
 // Reading other sessions' presence files and seating them.
 import type { AgentRecord, AgentState } from '../../types'
 import { presence } from './agent'
+import { basename } from './text'
 
 const STATES: AgentState[] = [
   'arriving', 'idle', 'thinking', 'typing', 'reading', 'writing', 'browsing',
@@ -29,7 +30,9 @@ export function parseRecord(text: string): AgentRecord | null {
   // optional since 0.2: fill what an older mod did not write
   const pid = isNum(r.pid) ? r.pid : 0
   const files = Array.isArray(r.files) ? r.files.filter((f): f is string => isStr(f, 4096)).slice(0, 8) : []
-  return { ...(r as AgentRecord), pid, files }
+  const room = isStr(r.room, 4096) && r.room ? r.room : (r.cwd as string)
+  const roomName = isStr(r.roomName, 100) && r.roomName ? r.roomName : basename(room)
+  return { ...(r as AgentRecord), pid, files, room, roomName }
 }
 
 export type Seat = AgentRecord & { isAway: boolean; isMe: boolean }

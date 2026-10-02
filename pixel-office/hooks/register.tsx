@@ -2,7 +2,7 @@ import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register, RenderPropsOf } from 'claude-code'
 
 import type { AgentRecord, LogLine, Standup, StandupAnswer } from '../types'
-import { byUrgency, newAgent, PRUNE_MS, reduce, type Signal } from './core/agent'
+import { AWAY_MS, byUrgency, newAgent, PRUNE_MS, reduce, type Signal } from './core/agent'
 import { alertLeader, alertsDue, formatWait, notifyArgv, waitingQueue } from './core/alerts'
 import { toRasterCells, toSvg } from './core/encode'
 import { asPrompt, makeMessage, messageId, parseMessage, pendingFiles } from './core/inbox'
@@ -11,9 +11,10 @@ import { drawOffice, layout, type Spotlight } from './core/scene'
 import { LOOK_IDS } from './core/sprites'
 import {
   ANSWER_WINDOW_MS, KEEP_MS, PENDING_MS, SHOW_MS, STANDUP_PROMPT, headline, latestRequest, makeRequest, parseAnswer,
-  parseReport, parseRequest, presenter,
+  parseReport, parseRequest, presenter, digest,
 } from './core/standup'
 import { basename, bubble, clean, truncate } from './core/text'
+import { parseTicket, roomOf, ticketsFor, uniqueName } from './core/rooms'
 
 type $ = EngineInterface
 
@@ -60,6 +61,7 @@ const agentsDir = () => `${rt.root}/agents`
 const inboxDir = (id: string) => `${rt.root}/inbox/${id}`
 const standupDir = () => `${rt.root}/standup`
 const uiDir = () => `${rt.root}/ui`
+const spawnDir = () => `${rt.root}/spawn`
 
 async function log($: $, id: string, who: string, text: string) {
   const line: LogLine = { at: await $.clock.now(), who, text: truncate(clean(text), 500) }
@@ -209,6 +211,8 @@ async function pollStandup($: $, now: number) {
   if (JSON.stringify(next) !== JSON.stringify(shown)) await update($, standup, () => next)
 
   const key = `standup:${rt.myId}`
+  const room = (await read($, me))?.room
+  if (request.room && request.room !== room) return // another room's standup
   if (rt.isAnswering || now - request.requestedAt > ANSWER_WINDOW_MS || (await $.store.get(key)) === id) return
   await $.store.set(key, id) // claimed before the fork, so a slow fork is never asked twice
   rt.isAnswering = true
@@ -216,10 +220,21 @@ async function pollStandup($: $, now: number) {
 }
 
 async function answerStandup($: $, requestId: string) {
-  const r = await $.model.fork({ prompt: STANDUP_PROMPT }).catch(() => null)
+  let r = await $.model.fork({ prompt: STANDUP_PROMPT }).catch(() => null)
+  let isFresh = false
+  if (r && !r.isAnswered && r.reason === 'nothing-to-fork') {
+    // a resumed session has history but nothing to fork until its next turn: summarise what it holds
+    const history = await $.session.messages().catch(() => [])
+    const text = Array.isArray(history) ? digest(history) : ''
+    isFresh = !text
+    if (text) {
+      const prompt = `${STANDUP_PROMPT}\n\nThe conversation so far:\n${text}`
+      r = await $.model.complete({ model: await $.session.model(), prompt, maxTokens: 300 }).catch(() => null)
+    }
+  }
   const report =
-    r && r.isAnswered ? parseReport(r.text)
-    : r && r.reason === 'nothing-to-fork' ? { done: 'Just got here, no work yet.', next: '', blocked: '' }
+    isFresh ? { done: 'Just got here, no work yet.', next: '', blocked: '' }
+    : r && r.isAnswered ? parseReport(r.text)
     : { done: "(couldn't report)", next: '', blocked: '' }
   const self = await read($, me)
   const answer: StandupAnswer = {
@@ -249,6 +264,12 @@ async function send($: $, to: string, text: string) {
   $.ui.toast('📨 Sent')
 }
 
+/** The scene shows this session's room; attention (queue, band, status) stays office-wide. */
+function myRoom(seats: Seat[]): Seat[] {
+  const room = seats.find(s => s.isMe)?.room
+  return room ? seats.filter(s => s.room === room) : seats
+}
+
 async function seatsNow($: $): Promise<{ seats: Seat[]; now: number }> {
   const now = await $.clock.now()
   return { seats: mergeRoster(await read($, roster), await read($, me), now), now }
@@ -276,7 +297,9 @@ function startBlitting($: $) {
 async function blitFrame($: $) {
   const m = rt.mounted
   if (!m) return
-  const { seats, now } = await seatsNow($)
+  const all = await seatsNow($)
+  const seats = myRoom(all.seats)
+  const now = all.now
   const { L, f } = scene(seats, m.w, now, await spotlightNow($, seats, now))
   // more or fewer desk rows is a new mount: redraw instead of blitting
   if (L.h !== m.h || seats.length !== m.n) return $.ui.invalidate('ui.render')
@@ -296,8 +319,7 @@ function stopAnimating() {
 }
 
 async function setIdentity($: $, field: 'name' | 'character', value: string) {
-  const cwd = (await read($, me))?.cwd ?? ''
-  await $.store.set(`${field === 'name' ? 'name' : 'look'}:${cwd}`, value)
+  await $.store.set(`${field === 'name' ? 'name' : 'look'}:session:${rt.myId}`, value)
   await update($, me, a => (a ? { ...a, [field]: value } : a))
   await save($)
 }
@@ -307,30 +329,75 @@ async function start($: $, cwd: string) {
   rt.myId = await $.session.id()
   rt.isAlertsOn = (await $.store.get('alerts')) !== 'off'
   rt.isSoundOn = (await $.store.get('sound')) !== 'off'
-  const name = String((await $.store.get(`name:${cwd}`)) ?? (basename(cwd) || 'claude'))
-  const character = String((await $.store.get(`look:${cwd}`)) ?? LOOK_IDS[hash(cwd) % LOOK_IDS.length])
+  const { room, roomName } = roomOf(cwd, await $.session.repo().catch(() => null))
+  const ticket = await claimTicket($, room)
+  // a name and look belong to this session: one set earlier (it survives a resume), a ticket's, or a fresh one
+  const savedName = await $.store.get(`name:session:${rt.myId}`)
+  const savedLook = await $.store.get(`look:session:${rt.myId}`)
+  const others = await roomNames($, room)
+  const name = typeof savedName === 'string' ? savedName : uniqueName(ticket?.name || basename(cwd) || 'claude', others)
+  const character = typeof savedLook === 'string' ? savedLook
+    : ticket?.character && LOOK_IDS.includes(ticket.character) ? ticket.character
+    : LOOK_IDS[hash(rt.myId) % LOOK_IDS.length]!
+  if (ticket) await $.store.set(`name:session:${rt.myId}`, name)
   // $PPID of a child shell is this Claude process: what an editor matches its terminals against
   const ran = await $.process.run(['sh', '-c', 'echo $PPID']).catch(() => null)
   const pid = Number.parseInt(ran?.stdout.trim() ?? '', 10)
-  await signal($, { kind: 'start', name: truncate(name, 40), cwd, character, pid: Number.isFinite(pid) ? pid : 0 })
+  await signal($, { kind: 'start', name: truncate(name, 40), cwd, character, pid: Number.isFinite(pid) ? pid : 0, room, roomName })
+  if (ticket?.task) void $.prompt.submit({ text: ticket.task })
   await $.command.register({ name: 'office', description: 'Open the Pixel Office: every Claude session as a character you can talk to' })
   $.clock.every(HEARTBEAT_MS, () => signal($, { kind: 'tick' }))
   $.clock.every(POLL_MS, () => poll($))
 }
 
+/** Names already used by live agents in this room, so a newcomer gets a distinct one. */
+async function roomNames($: $, room: string): Promise<string[]> {
+  const now = await $.clock.now()
+  const names: string[] = []
+  for (const f of await $.fs.list(agentsDir()).catch(() => [])) {
+    if (!f.name.endsWith('.json') || f.name === `${rt.myId}.json` || now - f.mtimeMs > AWAY_MS) continue
+    const r = parseRecord(await $.fs.read(`${agentsDir()}/${f.name}`).catch(() => ''))
+    if (r && r.room === room && r.state !== 'leaving') names.push(r.name)
+  }
+  return names
+}
+
+/**
+ * Takes the oldest fresh spawn ticket for this room, if an editor asked for a new agent here.
+ * `mv` is the claim: of two sessions starting at once, only one moves the file.
+ */
+async function claimTicket($: $, room: string) {
+  const now = await $.clock.now()
+  const tickets = []
+  for (const f of await $.fs.list(spawnDir()).catch(() => [])) {
+    if (!/^\d{13}-[0-9a-z]{6}\.json$/.test(f.name)) continue
+    const t = parseTicket(await $.fs.read(`${spawnDir()}/${f.name}`).catch(() => ''))
+    if (t && `${t.id}.json` === f.name) tickets.push(t)
+  }
+  for (const t of ticketsFor(tickets, room, now)) {
+    const from = `${spawnDir()}/${t.id}.json`
+    const moved = await $.process.run(['mv', '-n', '--', from, `${from}.claimed`]).catch(() => null)
+    const isStillThere = await $.fs.exists(from).catch(() => true)
+    if (moved?.exitCode === 0 && !isStillThere) return t
+  }
+  return null
+}
+
 async function office($: $, e: { surface: string; props: RenderPropsOf['Pane'] }) {
-  const { seats, now } = await seatsNow($)
+  const all = await seatsNow($)
+  const seats = myRoom(all.seats)
+  const now = all.now
   const columns = Math.max(24, e.props.bodyColumns)
   const spot = await spotlightNow($, seats, now)
   if (e.surface === 'terminal') {
     const { L, f } = scene(seats, columns, now, spot)
     rt.mounted = { w: L.w, h: L.h, n: seats.length }
     startBlitting($)
-    return { kind: 'raster' as const, columns: L.w, rows: L.h / 2, cells: toRasterCells(f), seats }
+    return { kind: 'raster' as const, columns: L.w, rows: L.h / 2, cells: toRasterCells(f), seats, all: all.seats }
   }
   const { L, f } = scene(seats, Math.min(columns, 132), now, spot)
   startSvgTicking($)
-  return { kind: 'svg' as const, source: toSvg(f, 6), width: L.w * 6, seats }
+  return { kind: 'svg' as const, source: toSvg(f, 6), width: L.w * 6, seats, all: all.seats }
 }
 
 function standupCard($: $, e: Parameters<$['ui']['resolve']>[0], st: Standup, seats: Seat[], now: number) {
@@ -453,7 +520,7 @@ export const register: Register = on => {
     const { Box, Text, Button } = $.ui.resolve(e)
     const view = await office($, e)
     const pick = await read($, selected)
-    const chosen = view.seats.find(s => s.id === pick) ?? null
+    const chosen = view.all.find(s => s.id === pick) ?? null
     const lines = chosen ? ((await read($, logs))[chosen.id] ?? []).slice(-8) : []
 
     let scene
@@ -480,7 +547,9 @@ export const register: Register = on => {
     }
 
     const now = await $.clock.now()
-    const queue = waitingQueue(view.seats).filter(s => !s.isMe)
+    const queue = waitingQueue(view.all).filter(s => !s.isMe)
+    const elsewhere = view.all.length - view.seats.length
+    const roomName = view.seats.find(s => s.isMe)?.roomName ?? 'office'
     const st = await read($, standup)
     const chips = [...view.seats].sort(byUrgency).slice(0, 9)
     return (
@@ -511,7 +580,10 @@ export const register: Register = on => {
             />
           ))}
         </Box>
-        {view.seats.length < 2 && <Text dimColor>Start another Claude Code session: it walks in and takes a desk.</Text>}
+        <Text dimColor>
+          📁 {roomName} · {view.seats.length} here{elsewhere > 0 ? ` · ${elsewhere} in other rooms` : ''}
+        </Text>
+        {view.seats.length < 2 && <Text dimColor>Start another Claude Code session in this repo: it walks into this room.</Text>}
         {st && standupCard($, e, st, view.seats, now)}
         {chosen && (
           <Box flexDirection="column" borderStyle="round" paddingX={1}>

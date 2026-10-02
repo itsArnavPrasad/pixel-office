@@ -35,6 +35,10 @@ export type AgentRecord = {
   pid: number
   /** The last absolute paths this session edited, newest first. */
   files: string[]
+  /** Which office room: the repository root (worktrees share their main tree's), else the cwd. */
+  room: string
+  /** The room's display name: the repository's name, else the folder's. */
+  roomName: string
 }
 
 /** One message, ~/.claude/pixel-office/inbox/<to>/<id>.json. */
@@ -53,7 +57,7 @@ export type LogLine = { at: number; who: string; text: string }
 export type AlertMemory = Record<string, { since: number; isReminded: boolean }>
 
 /** ~/.claude/pixel-office/standup/<id>.json */
-export type StandupRequest = { v: 1; id: string; by: string; requestedAt: number }
+export type StandupRequest = { v: 1; id: string; by: string; requestedAt: number; room?: string }
 
 /** ~/.claude/pixel-office/standup/<request id>/<session id>.json */
 export type StandupAnswer = {
@@ -68,6 +72,9 @@ export type StandupAnswer = {
 }
 
 export type Standup = { request: StandupRequest; answers: StandupAnswer[] }
+
+/** ~/.claude/pixel-office/spawn/<id>.json: an editor asked for a new agent in a room. */
+export type SpawnTicket = { v: 1; id: string; room: string; name: string; task: string; character: string; createdAt: number }
 
 declare module 'claude-code' {
   interface PluginState {
