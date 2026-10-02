@@ -293,3 +293,55 @@ the `sounds` option.
 | A hook throws | every hook wraps `next(e)` so the session itself is never blocked; failures go to `$.ui.log` |
 | Stale files from crashed sessions | heartbeat timeout → `away`, prune after 10 min |
 | File write races | one writer per file (own record, or a unique inbox file name); readers tolerate partial JSON |
+
+---
+
+## 7. Feature plan: Attention queue + Standup (added 2026-10-02)
+
+### 7.1 Attention queue with alerts
+**Goal:** you never miss an agent that is blocked on you, and you always know which
+one has waited longest.
+
+| Piece | Behaviour |
+|---|---|
+| Queue | Every seat in `needs-you`, oldest `since` first (the time it started waiting). |
+| Pane | A "Needs you" card at the top of the pane: `❗ web-app · 2m · Allow Bash: rm -rf dist?` and a `Next` button (hotkey `n`) that opens the oldest one's dialogue. |
+| Band | `AbovePrompt` (terminal + desktop) shows the queue whenever **another** session waits, even with the pane closed. `n` opens the pane on the oldest. It hides during surveys and when nobody waits. |
+| Status line | Already shows the count. |
+| Toast | Every session toasts when **another** session starts waiting. A session's own wait already shows its permission dialog. |
+| Chime + macOS notification | Fired once per waiting episode by **one** session only, the *alert leader*: the earliest-arrived session that is not away, ties broken by id. Without this, N open sessions would produce N chimes. One reminder after 3 min if it is still waiting. |
+| Settings | `/office alerts on\|off` (toasts, chime and notification) and `/office sound on\|off` (chime only). Stored in `$.store`. |
+| Honesty | The dialogue for a waiting agent says that permission prompts must be answered in that session's own window, and that a message typed here runs after the prompt is answered. |
+
+macOS notification: `osascript -e 'on run argv' -e 'display notification (item 1 of argv) with title (item 2 of argv)' -e 'end run' -- <body> <title>`.
+The text goes in as an argv item and never as script source, so injection is not possible.
+
+Pure module `core/alerts.ts`: `waitingQueue`, `alertLeader`, `alertsDue` (new / reminder / cleared episodes),
+`formatWait`, `notifyArgv`. The alert memory is `$.state` (`alerted`), so a hot reload does not re-chime.
+
+### 7.2 Standup
+**Goal:** one button, and every agent says what it did, what's next, and what blocks it.
+
+Flow:
+1. `Standup` button (hotkey `s`) or `/office standup`: the initiator writes `standup/<reqId>.json`.
+2. Every session's poll sees a request less than 5 min old that it has not answered yet (cursor in `$.store`), and runs
+   `$.model.fork({ prompt: STANDUP_PROMPT })`, which asks over its own transcript and is served from the prompt cache.
+3. The answer is written to `standup/<reqId>/<sessionId>.json`: `{ done, next, blocked, at }`.
+   `nothing-to-fork` → "Just got here, no work yet."; a fork failure → "(couldn't report)".
+4. Every open pane shows the latest standup (< 10 min old) as a card: one row per agent with Done / Next / Blocked, `…`
+   while pending, and `(no answer)` after 90 s.
+5. In the scene, the agents take turns presenting, 5 s each in answer order: the presenter stands up and their bubble shows the
+   line, in green. Blocked agents get the yellow bubble.
+6. GC: standup requests and answers older than 1 h are removed in the stale sweep.
+
+Pure module `core/standup.ts`: `STANDUP_PROMPT`, `parseReport` (tolerates bullets, markdown and missing lines),
+`makeRequest`/`parseRequest`/`parseAnswer`, `latestRequest`, `presenter`.
+
+### 7.3 Tests (gate: validate + tsc + all tests green)
+- **alerts:** queue order; the leader skips away seats, ties broken by id; a new episode fires once; no repeat on the next poll;
+  one reminder at 3 min, never a second; a cleared episode re-fires next time; `formatWait`; argv never interpolates text.
+- **standup:** parseReport on clean / bulleted / markdown / partial / garbage input; validation rejects junk and path tricks;
+  latestRequest picks the newest within the window; presenter cycles and wraps.
+- **integration:** another agent starts waiting → the leader chimes and notifies once, the non-leader only toasts; reminder;
+  alerts off → silent; band shows and hides, and `n` opens the pane on the oldest; Standup press → request written →
+  fork called once → answer written → card shows our row and another session's row; nothing-to-fork fallback.
